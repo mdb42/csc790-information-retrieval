@@ -2,12 +2,27 @@ import os
 import sys
 import pickle
 import nltk
+from collections import Counter
+
+def print_banner():
+    print("================================================")
+    print("=============== CSC790-IR Homework 01 ===============")
+    print("First Name: Matthew")
+    print("Last Name : Branson")
+    print("================================================")
+
+def load_stopwords(stop_words_file):
+    stopwords = set()
+    with open(stop_words_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            w = line.strip()
+            if w:
+                stopwords.add(w.lower())
+    return stopwords
 
 class InvertedIndex:
     def __init__(self, stop_words=None):
-
         try:
-            # Test if 'punkt_tab' is already available
             nltk.data.find('tokenizers/punkt_tab/english.pickle')
         except LookupError:
             nltk.download('punkt_tab')
@@ -15,21 +30,16 @@ class InvertedIndex:
         if not os.path.exists('documents'):
             os.makedirs('documents')
         
-        self.index = {}             # {term: set_of_docIDs}
-        self.doc_id_map = {}        # {filename: doc_id}
-        self.reverse_doc_id_map = {}# {doc_id: filename} for retrieval
+        self.index = {}               # {term: set_of_docIDs}
+        self.doc_id_map = {}          # {filename: doc_id}
+        self.reverse_doc_id_map = {}  # {doc_id: filename}
         self.stop_words = stop_words if stop_words else set()
         self.stemmer = nltk.stem.PorterStemmer()
+        self.term_frequency = Counter()
 
     def add_document(self, doc_id, text):
-
-        # 1) Tokenize
         tokens = nltk.word_tokenize(text)
 
-        # 2) Normalize & filter:
-        #    a) Case-fold
-        #    b) Remove stop words
-        #    c) Stem
         normalized_tokens = []
         for token in tokens:
             lower = token.lower()
@@ -37,13 +47,12 @@ class InvertedIndex:
                 stemmed = self.stemmer.stem(lower)
                 normalized_tokens.append(stemmed)
 
-        # 3) Insert into index
-        #    For each term, add doc_id to the postings set
         for term in normalized_tokens:
             if term not in self.index:
                 self.index[term] = set()
             self.index[term].add(doc_id)
-    
+            self.term_frequency[term] += 1
+
     def get_document_count(self):
         return len(self.doc_id_map)
     
@@ -59,7 +68,8 @@ class InvertedIndex:
                 'index': self.index,
                 'doc_id_map': self.doc_id_map,
                 'reverse_doc_id_map': self.reverse_doc_id_map,
-                'stop_words': self.stop_words
+                'stop_words': self.stop_words,
+                'term_frequency': self.term_frequency
             }, f)
 
     def load(self, filepath):
@@ -69,16 +79,14 @@ class InvertedIndex:
             self.doc_id_map = data['doc_id_map']
             self.reverse_doc_id_map = data['reverse_doc_id_map']
             self.stop_words = data['stop_words']
+            self.term_frequency = data['term_frequency']
 
     def boolean_retrieve(self, query_str):
-        # Tokenize the query
         tokens = nltk.word_tokenize(query_str)
-
         parsed_tokens = []
         for token in tokens:
             lower = token.lower()
             if lower in ('and', 'or', '(', ')'):
-                # Boolean operators or parentheses
                 if lower == 'and':
                     parsed_tokens.append('&')
                 elif lower == 'or':
@@ -89,25 +97,19 @@ class InvertedIndex:
                 # This token is probably a term...
                 if lower.isalpha():
                     stemmed = self.stemmer.stem(lower)
-                    # Replace the term with a Python set expression
                     if stemmed in self.index:
                         parsed_tokens.append(f"set({list(self.index[stemmed])})")
                     else:
-                        # Term not in index -> empty set
                         parsed_tokens.append("set()")
                 else:
-                    # Non-alphabetic tokens (numbers, punctuation, etc.) => empty
                     parsed_tokens.append("set()")
 
-        # Join everything back into a single expression
         expression = " ".join(parsed_tokens)
-        # Safely evaluate the expression
         try:
             results = eval(expression)
         except:
             print(f"[!] Could not parse query expression: {query_str}")
             results = set()
-
         return results
 
 def build_inverted_index(directory_path, stop_words):
@@ -117,9 +119,7 @@ def build_inverted_index(directory_path, stop_words):
 
     for filename in os.listdir(directory_path):
         filepath = os.path.join(directory_path, filename)
-
         if filename.endswith('.txt'):
-            print(f"  - Processing '{filename}'...")
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                 text = f.read()
 
@@ -130,20 +130,16 @@ def build_inverted_index(directory_path, stop_words):
 
     return inv_index
 
+def display_top_n_terms(inv_index, n=10):
+    print(f"\nTop {n} most frequent terms in the entire corpus:")
+    for term, freq in inv_index.term_frequency.most_common(n):
+        print(f"  {term}: {freq}")
+
 def main():
-    """
-      1) Build or load the index
-      2) Show index size
-      3) Prompt user for queries
-      4) Return matching documents
-    """
-    # Directory containing your documents
+    print_banner()
+    stop_words_file = "stopwords.txt"
+    stop_words = load_stopwords(stop_words_file)
     documents_dir = "documents"
-
-    # Just a few common stop words. Will find a better option later.
-    stop_words = {"the", "a", "for", "to", "is", "are", "in", "of", "and"}
-
-    # Decide whether to build or load from file
     index_file_path = "saved_index.pkl"
     use_existing_index = False
 
@@ -157,10 +153,14 @@ def main():
         print("[+] Saving the new index to disk...")
         inv_index.save(index_file_path)
 
-    # Display the size of the index
     size_in_bytes = inv_index.get_index_size_in_bytes()
-    print(f"[+] Inverted Index built/loaded. Size in memory: {size_in_bytes} bytes")
+    size_in_mb = size_in_bytes / (1024 * 1024)
+    print(f"[+] Inverted Index built/loaded. Size in memory: "
+          f"{size_in_bytes} bytes ({size_in_mb:.2f} MB)")
 
+    display_top_n_terms(inv_index, n=10)
+
+    # Query and Retrieval
     while True:
         query_str = input("\nEnter a Boolean query (or type 'exit' to quit): ")
         if query_str.lower() == 'exit':
