@@ -5,4 +5,6 @@ __pycache__/
 .DS_Store
 .env
 HW01/documents/
+HW01/saved_index.pkl
 local/
+setup_requirements.bat

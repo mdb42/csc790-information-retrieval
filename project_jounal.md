@@ -59,7 +59,7 @@ Alternatively, I could use the multiprocessing module. I don't know enough yet t
 
 - I'm using the Counter class from collections, which might seem like overkill, but it gives us the most_common(n) method out of the box and has an update() method which will be helpfully simple in a parallel implementation later.
 
-### Current State of the Project
+### January 28, 2025, 8:20 AM
 
 - So, initially, I tried using ProcessPoolExecuter, and I didn't understand why it was failing. I was trying to pass a nested function to it, and I didn't realize that it was causing a pickling error. I gutted that out then and tried using the multiprocessing module instead, getting it to work, but only after also needing to refactor to similarly avoid the nested function pickling. That being the case, I don't actually know which is better between the two approaches, but this multiprocessing implementation appears to be working at least.
 
@@ -69,4 +69,13 @@ Alternatively, I could use the multiprocessing module. I don't know enough yet t
 
 - Still need to investigate the performance disparity between desktop and laptop from the initial implementation. I'm going to go bottleneck hunting.
 
+### Current State of the Project
 
+- Implemented temporary profiling. This was way more complex than anticipated due to the distributed processing - each worker process needed to track its own timing metrics, which then had to be aggregated and compared against wall clock time. Not perfect! But it gave me some idea of what is going on.
+
+It would seem at least:
+- Tokenization is the primary bottleneck
+- Manual testing with different core counts showed total tokenization time appears to scale with the square root of the core count
+- Document loading and index merging are relatively efficient in comparison
+
+- Otherwise, I created a main.py entry point wrapper again to avoid dancing between directories and to better manage the parameters.

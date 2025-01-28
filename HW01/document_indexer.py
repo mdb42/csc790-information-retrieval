@@ -36,10 +36,6 @@ def display_top_n_terms(inv_index, n=10):
 
 class InvertedIndex:
     def __init__(self, stop_words=None):
-
-        if not os.path.exists('documents'):
-            os.makedirs('documents')
-        
         self.index = {}               # {term: set_of_docIDs}
         self.doc_id_map = {}          # {filename: doc_id}
         self.reverse_doc_id_map = {}  # {doc_id: filename}
@@ -143,13 +139,6 @@ def build_inverted_index(directory_path, stop_words):
     return inv_index
 
 def process_document_chunk(chunk_data):
-    """
-    Oh, my dear process_document_chunk function, how I love thee.
-    I so needed you in my life. If only I had known.
-
-    XOXO
-    chunk_data: Tuple of (chunk, start_id, directory_path, stop_words)
-    """
     chunk, start_id, directory_path, stop_words = chunk_data
     local_idx = InvertedIndex(stop_words=stop_words)
     current_id = start_id
@@ -181,23 +170,17 @@ def build_inverted_index_parallel(directory_path, stop_words, max_workers=None):
     inv_index = InvertedIndex(stop_words=stop_words)
     doc_files = [f for f in os.listdir(directory_path) if f.endswith('.txt')]
     
-    # Chunk up the documents for each worker
     chunk_size = max(1, len(doc_files) // max_workers)
     doc_chunks = [doc_files[i:i + chunk_size] 
                  for i in range(0, len(doc_files), chunk_size)]
-    
-    # Prepare the expected tuple data for each worker
     chunk_data = [
         (chunk, 1 + i * chunk_size, directory_path, stop_words)
         for i, chunk in enumerate(doc_chunks)
     ]
     
-    # Poof! Abracadabra! Hocus pocus! Wingardium leviosa!
-    # This is where the magic happens.
     with mp.Pool(max_workers) as pool:
         results = pool.map(process_document_chunk, chunk_data)
     
-    # Pencils down. Turn in your work.
     for partial_index in results:
         inv_index.doc_id_map.update(partial_index['doc_id_map'])
         inv_index.reverse_doc_id_map.update(partial_index['reverse_doc_id_map'])
@@ -209,28 +192,21 @@ def build_inverted_index_parallel(directory_path, stop_words, max_workers=None):
         
         for term, freq in partial_index['term_frequency'].items():
             inv_index.term_frequency[term] += freq
-    
     return inv_index
 
 ###############################################################################
-# Main Function - Orchestrating the Indexing + Querying
+# Run Function - Orchestrating the Indexing + Querying
 ###############################################################################
 
-def main():
-    # Here now to avoid all the workers attempting to download the tokenizer
+def run(stopwords_dir, documents_dir, index_file_path,
+        use_existing_index=False, use_parallel=True):
     try:
         nltk.data.find('tokenizers/punkt_tab/english.pickle')
     except LookupError:
         nltk.download('punkt_tab')
 
     print_banner()
-    stop_words_file = "stopwords.txt"
-    stop_words = load_stopwords(stop_words_file)
-    documents_dir = "documents"
-    index_file_path = "saved_index.pkl"
-    use_existing_index = False
-    use_parallel = True
-
+    stop_words = load_stopwords(stopwords_dir)
     if use_existing_index and os.path.exists(index_file_path):
         print("[+] Loading existing index from file...")
         inv_index = InvertedIndex()
@@ -262,7 +238,6 @@ def main():
         query_str = input("\nEnter a Boolean query (or type 'exit' to quit): ")
         if query_str.lower() == 'exit':
             break
-
         matching_doc_ids = inv_index.boolean_retrieve(query_str)
         if not matching_doc_ids:
             print("No documents matched your query.")
@@ -276,4 +251,4 @@ def main():
                 print(f"  - {fname}")
 
 if __name__ == "__main__":
-    main()
+    run()
