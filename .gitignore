@@ -4,4 +4,5 @@ __pycache__/
 *.pyo
 .DS_Store
 .env
-documents/
+HW01/documents/
+local/

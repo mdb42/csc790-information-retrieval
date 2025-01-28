@@ -3,6 +3,11 @@ import sys
 import pickle
 import nltk
 from collections import Counter
+import multiprocessing as mp
+
+###############################################################################
+# Utility Functions
+###############################################################################
 
 def print_banner():
     print("================================================")
@@ -20,12 +25,17 @@ def load_stopwords(stop_words_file):
                 stopwords.add(w.lower())
     return stopwords
 
+def display_top_n_terms(inv_index, n=10):
+    print(f"\nTop {n} most frequent terms in the entire corpus:")
+    for term, freq in inv_index.term_frequency.most_common(n):
+        print(f"  {term}: {freq}")
+
+###############################################################################
+# The InvertedIndex Class
+###############################################################################
+
 class InvertedIndex:
     def __init__(self, stop_words=None):
-        try:
-            nltk.data.find('tokenizers/punkt_tab/english.pickle')
-        except LookupError:
-            nltk.download('punkt_tab')
 
         if not os.path.exists('documents'):
             os.makedirs('documents')
@@ -39,7 +49,6 @@ class InvertedIndex:
 
     def add_document(self, doc_id, text):
         tokens = nltk.word_tokenize(text)
-
         normalized_tokens = []
         for token in tokens:
             lower = token.lower()
@@ -112,6 +121,10 @@ class InvertedIndex:
             results = set()
         return results
 
+###############################################################################
+# Building the Inverted Index
+###############################################################################
+
 def build_inverted_index(directory_path, stop_words):
     print(f"[+] Building index from documents in '{directory_path}'...")
     inv_index = InvertedIndex(stop_words=stop_words)
@@ -122,7 +135,6 @@ def build_inverted_index(directory_path, stop_words):
         if filename.endswith('.txt'):
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                 text = f.read()
-
             inv_index.doc_id_map[filename] = current_doc_id
             inv_index.reverse_doc_id_map[current_doc_id] = filename
             inv_index.add_document(doc_id=current_doc_id, text=text)
@@ -130,18 +142,94 @@ def build_inverted_index(directory_path, stop_words):
 
     return inv_index
 
-def display_top_n_terms(inv_index, n=10):
-    print(f"\nTop {n} most frequent terms in the entire corpus:")
-    for term, freq in inv_index.term_frequency.most_common(n):
-        print(f"  {term}: {freq}")
+def process_document_chunk(chunk_data):
+    """
+    Oh, my dear process_document_chunk function, how I love thee.
+    I so needed you in my life. If only I had known.
+
+    XOXO
+    chunk_data: Tuple of (chunk, start_id, directory_path, stop_words)
+    """
+    chunk, start_id, directory_path, stop_words = chunk_data
+    local_idx = InvertedIndex(stop_words=stop_words)
+    current_id = start_id
+    
+    for filename in chunk:
+        filepath = os.path.join(directory_path, filename)
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+            local_idx.doc_id_map[filename] = current_id
+            local_idx.reverse_doc_id_map[current_id] = filename
+            local_idx.add_document(current_id, text)
+            current_id += 1
+        except Exception as e:
+            print(f"Error processing {filename}: {e}")
+            continue
+            
+    return {
+        'index': local_idx.index,
+        'doc_id_map': local_idx.doc_id_map,
+        'reverse_doc_id_map': local_idx.reverse_doc_id_map,
+        'term_frequency': local_idx.term_frequency
+    }
+
+def build_inverted_index_parallel(directory_path, stop_words, max_workers=None):    
+    if max_workers is None:
+        max_workers = mp.cpu_count()
+    
+    inv_index = InvertedIndex(stop_words=stop_words)
+    doc_files = [f for f in os.listdir(directory_path) if f.endswith('.txt')]
+    
+    # Chunk up the documents for each worker
+    chunk_size = max(1, len(doc_files) // max_workers)
+    doc_chunks = [doc_files[i:i + chunk_size] 
+                 for i in range(0, len(doc_files), chunk_size)]
+    
+    # Prepare the expected tuple data for each worker
+    chunk_data = [
+        (chunk, 1 + i * chunk_size, directory_path, stop_words)
+        for i, chunk in enumerate(doc_chunks)
+    ]
+    
+    # Poof! Abracadabra! Hocus pocus! Wingardium leviosa!
+    # This is where the magic happens.
+    with mp.Pool(max_workers) as pool:
+        results = pool.map(process_document_chunk, chunk_data)
+    
+    # Pencils down. Turn in your work.
+    for partial_index in results:
+        inv_index.doc_id_map.update(partial_index['doc_id_map'])
+        inv_index.reverse_doc_id_map.update(partial_index['reverse_doc_id_map'])
+        
+        for term, doc_ids in partial_index['index'].items():
+            if term not in inv_index.index:
+                inv_index.index[term] = set()
+            inv_index.index[term].update(doc_ids)
+        
+        for term, freq in partial_index['term_frequency'].items():
+            inv_index.term_frequency[term] += freq
+    
+    return inv_index
+
+###############################################################################
+# Main Function - Orchestrating the Indexing + Querying
+###############################################################################
 
 def main():
+    # Here now to avoid all the workers attempting to download the tokenizer
+    try:
+        nltk.data.find('tokenizers/punkt_tab/english.pickle')
+    except LookupError:
+        nltk.download('punkt_tab')
+
     print_banner()
     stop_words_file = "stopwords.txt"
     stop_words = load_stopwords(stop_words_file)
     documents_dir = "documents"
     index_file_path = "saved_index.pkl"
     use_existing_index = False
+    use_parallel = True
 
     if use_existing_index and os.path.exists(index_file_path):
         print("[+] Loading existing index from file...")
@@ -149,7 +237,16 @@ def main():
         inv_index.load(index_file_path)
     else:
         print("[+] Building a new index from the documents directory...")
-        inv_index = build_inverted_index(documents_dir, stop_words=stop_words)
+        if use_parallel:
+            print(f"[+] Building index using {mp.cpu_count()} CPU cores...")
+            inv_index = build_inverted_index_parallel(
+                documents_dir, 
+                stop_words=stop_words,
+                max_workers=None  # Will use all available cores
+            )
+        else:
+            inv_index = build_inverted_index(documents_dir, stop_words=stop_words)
+
         print("[+] Saving the new index to disk...")
         inv_index.save(index_file_path)
 
@@ -170,8 +267,10 @@ def main():
         if not matching_doc_ids:
             print("No documents matched your query.")
         else:
-            matching_filenames = [inv_index.reverse_doc_id_map[doc_id] 
-                                  for doc_id in sorted(matching_doc_ids)]
+            matching_filenames = [
+                inv_index.reverse_doc_id_map[doc_id] 
+                for doc_id in sorted(matching_doc_ids)
+            ]
             print(f"Documents matching '{query_str}':")
             for fname in matching_filenames:
                 print(f"  - {fname}")
