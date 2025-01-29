@@ -87,35 +87,96 @@ class InvertedIndex:
             self.term_frequency = data['term_frequency']
 
     def boolean_retrieve(self, query_str):
+        # Universal set of doc IDs
+        all_docs = set(self.reverse_doc_id_map.keys())
+        all_docs_str = f"set({list(all_docs)})"
+
         tokens = nltk.word_tokenize(query_str)
         parsed_tokens = []
-        for token in tokens:
-            lower = token.lower()
-            if lower in ('and', 'or', '(', ')'):
-                if lower == 'and':
+        i = 0
+        while i < len(tokens):
+            token = tokens[i].lower()
+            
+            # Missing operator? Assume it's an AND
+            if parsed_tokens and token not in ('and', 'or', ')', '|', '&'):
+                last_token = parsed_tokens[-1]
+                if last_token not in ('and', 'or', '(', '|', '&'):
                     parsed_tokens.append('&')
-                elif lower == 'or':
-                    parsed_tokens.append('|')
+
+            if token == 'and':
+                parsed_tokens.append('&')
+            elif token == 'or':
+                parsed_tokens.append('|')
+            elif token == 'not':
+                if i + 1 < len(tokens):
+                    next_tok = tokens[i + 1].lower()
+                    if next_tok.isalpha():
+                        # It's a term
+                        stemmed = self.stemmer.stem(next_tok)
+                        if stemmed in self.index:
+                            term_set_str = f"set({list(self.index[stemmed])})"
+                        else:
+                            term_set_str = "set()"
+                        parsed_tokens.append(f"({all_docs_str} - {term_set_str})")
+                        i += 2  # Skip the next token
+                        continue
+                    elif next_tok == '(':
+                        subexpr_tokens, offset = self._gather_parenthesized(tokens, i + 1)
+                        subexpr_str = self._build_subexpression(subexpr_tokens, all_docs_str)
+                        parsed_tokens.append(f"({all_docs_str} - ({subexpr_str}))")
+                        i += (1 + offset)
+                        continue
+                    else:
+                        parsed_tokens.append(f"({all_docs_str} - set())")
+                        i += 2
+                        continue
                 else:
-                    parsed_tokens.append(token)
+                    # Your query ended with NOT? That's nice for you. I hope that works out.
+                    parsed_tokens.append(f"({all_docs_str} - set())")
+            elif token in ('(', ')'):
+                parsed_tokens.append(token)
             else:
-                # This token is probably a term...
-                if lower.isalpha():
-                    stemmed = self.stemmer.stem(lower)
+                if token.isalpha():
+                    stemmed = self.stemmer.stem(token)
                     if stemmed in self.index:
                         parsed_tokens.append(f"set({list(self.index[stemmed])})")
                     else:
                         parsed_tokens.append("set()")
                 else:
                     parsed_tokens.append("set()")
+            i += 1
 
         expression = " ".join(parsed_tokens)
         try:
             results = eval(expression)
-        except:
-            print(f"[!] Could not parse query expression: {query_str}")
+        except Exception as e:
+            print(f"[!] Could not parse query expression '{query_str}': {e}")
             results = set()
         return results
+
+    def _gather_parenthesized(self, tokens, start_index):
+        subexpr_tokens = []
+        paren_count = 0
+        i = start_index
+        while i < len(tokens):
+            t = tokens[i].lower()
+            subexpr_tokens.append(t)
+            if t == '(':
+                paren_count += 1
+            elif t == ')':
+                paren_count -= 1
+                if paren_count < 0:
+                    # Found the matching one
+                    return (subexpr_tokens, i - start_index)
+            i += 1
+        return (subexpr_tokens, i - start_index - 1)
+
+    def _build_subexpression(self, subexpr_tokens, all_docs_str):
+        if subexpr_tokens and subexpr_tokens[0] == '(':
+            subexpr_tokens = subexpr_tokens[1:]
+        if subexpr_tokens and subexpr_tokens[-1] == ')':
+            subexpr_tokens = subexpr_tokens[:-1]
+        return " ".join(subexpr_tokens)
 
 ###############################################################################
 # Building the Inverted Index

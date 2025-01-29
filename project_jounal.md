@@ -69,7 +69,7 @@ Alternatively, I could use the multiprocessing module. I don't know enough yet t
 
 - Still need to investigate the performance disparity between desktop and laptop from the initial implementation. I'm going to go bottleneck hunting.
 
-### Current State of the Project
+### January 28, 11:49 AM
 
 - Implemented temporary profiling. This was way more complex than anticipated due to the distributed processing - each worker process needed to track its own timing metrics, which then had to be aggregated and compared against wall clock time. Not perfect! But it gave me some idea of what is going on.
 
@@ -79,3 +79,24 @@ It would seem at least:
 - Document loading and index merging are relatively efficient in comparison
 
 - Otherwise, I created a main.py entry point wrapper again to avoid dancing between directories and to better manage the parameters.
+
+### Current State of the Project
+
+- I tried batching the tokenization and had like zero improvement. I guess that makes sense, since it's already broken up and distributed among the workers by document, and just shuffling the data around isn't going to help. If we had more variety in document sizes, I imagined it might have allowed for some load balancing among the workers, but ultimately the process overhead just isn't that big to begin with.
+
+- So, time to think about the query process, which is basically still in its original form from the initial prototype implementation before the assignment even started. If this was the real world, I would actually just use a parsing library and not devote cognitive effort towards this. We have a new lecture now though with pseudocode for finding the intersection of two postings...
+
+It shows:
+- Walk through two posting lists simultaneously
+- Compare document IDs, and when they match, add to the answer
+- When they don't match, advance the pointer of the list with the smaller document ID
+
+Well, duh...
+
+I don't like it though. There's nothing wrong with it on its face, and I imagine something similar is already happening under the hood when using Python sets. The key issue is that Python sets are implemented in C, and trying to reinvent the wheel here is only going to slow things down comparably. I'm going to keep playing around and see if I can implement logical NOTs and more robust grouping while continuing to use Python sets.
+
+- So, set theory... To handle NOTs, we need a universal set of document IDs. When we see a NOT operator, we can interpret it as the universal set minus some set of terms, essentially just checking for intersection with the complement. This seems to work as expected, but I've surely just not yet discovered all the ways to break it.
+
+- I've adapted the query logic into a while loop and just extended the chain of else-ifs in the query parsing to handle the new operators and special cases. I actually still plan to make this recursive, and though not fully implemented yet, I did extract out the logic for gathering within parantheses and for subexpression-building into separate helper functions to make that easier when I get to it. I'm passing around some parameters too that I don't use yet, but I will probably need them later.
+
+- Lastly, I put in a quick check beforehand for if an operator is missing between two terms, and I am inserting an AND to handle it like Google does.
