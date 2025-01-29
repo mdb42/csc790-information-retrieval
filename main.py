@@ -4,7 +4,8 @@ def main():
     params = {
         "stopwords_dir": "HW01//stopwords.txt",
         "documents_dir": "HW01//documents",
-        "index_file_path": "HW01//saved_index.pkl",
+        "index_file": "HW01//saved_index.pkl",
+        "query_file": "HW01//query_list.txt",
         "use_existing_index": False,
         "use_parallel": True,
     }

@@ -69,7 +69,7 @@ Alternatively, I could use the multiprocessing module. I don't know enough yet t
 
 - Still need to investigate the performance disparity between desktop and laptop from the initial implementation. I'm going to go bottleneck hunting.
 
-### January 28, 11:49 AM
+### January 28, 2025, 11:49 AM
 
 - Implemented temporary profiling. This was way more complex than anticipated due to the distributed processing - each worker process needed to track its own timing metrics, which then had to be aggregated and compared against wall clock time. Not perfect! But it gave me some idea of what is going on.
 
@@ -80,7 +80,7 @@ It would seem at least:
 
 - Otherwise, I created a main.py entry point wrapper again to avoid dancing between directories and to better manage the parameters.
 
-### Current State of the Project
+### January 28, 2025, 11:43 PM
 
 - I tried batching the tokenization and had like zero improvement. I guess that makes sense, since it's already broken up and distributed among the workers by document, and just shuffling the data around isn't going to help. If we had more variety in document sizes, I imagined it might have allowed for some load balancing among the workers, but ultimately the process overhead just isn't that big to begin with.
 
@@ -100,3 +100,13 @@ I don't like it though. There's nothing wrong with it on its face, and I imagine
 - I've adapted the query logic into a while loop and just extended the chain of else-ifs in the query parsing to handle the new operators and special cases. I actually still plan to make this recursive, and though not fully implemented yet, I did extract out the logic for gathering within parantheses and for subexpression-building into separate helper functions to make that easier when I get to it. I'm passing around some parameters too that I don't use yet, but I will probably need them later.
 
 - Lastly, I put in a quick check beforehand for if an operator is missing between two terms, and I am inserting an AND to handle it like Google does.
+
+### Current State of the Project
+
+I created a smaller set of documents so I could more easily test the query logic, and I set up a query list so I could just punch through all the query variations each run to see if they were working as expected. This revealed a few issues:
+
+- Mid-expression NOTs still needed to have an implied preceding AND operator. This was easily fixed by just inserting it in the NOT handling logic.
+- NOTs that were preceding grouped ORs were coming up malformed. Really, I had two processes for expression interpretations occurring - a more rigorous one at the top scope, but a hacky one for the subexpressions. I needed to extract that logic out and just use it for both cases, so I created the parse_tokens_to_expression() function and call it wherever needed.
+- I was also getting an off-by-one error in the NOT handling logic in some cases for the paren_count, easily fixed though by just adjusting the conditional for when returning how many tokens were consumed.
+
+After fixing these issues, I stress-tested the query parser with increasingly complex cases: deeply nested parentheses with mixed operators, case sensitivity and irregular spacing, malformed queries with extra punctuation and operators, complex combinations of NOTs and parenthetical grouping. It didn't explode. 

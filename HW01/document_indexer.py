@@ -86,19 +86,14 @@ class InvertedIndex:
             self.stop_words = data['stop_words']
             self.term_frequency = data['term_frequency']
 
-    def boolean_retrieve(self, query_str):
-        # Universal set of doc IDs
-        all_docs = set(self.reverse_doc_id_map.keys())
-        all_docs_str = f"set({list(all_docs)})"
-
-        tokens = nltk.word_tokenize(query_str)
+    def _parse_tokens_to_expression(self, tokens, all_docs_str):
         parsed_tokens = []
         i = 0
         while i < len(tokens):
             token = tokens[i].lower()
             
             # Missing operator? Assume it's an AND
-            if parsed_tokens and token not in ('and', 'or', ')', '|', '&'):
+            if parsed_tokens and token not in ('and', 'or', 'not', ')', '|', '&', '('):
                 last_token = parsed_tokens[-1]
                 if last_token not in ('and', 'or', '(', '|', '&'):
                     parsed_tokens.append('&')
@@ -108,25 +103,24 @@ class InvertedIndex:
             elif token == 'or':
                 parsed_tokens.append('|')
             elif token == 'not':
+                if parsed_tokens and parsed_tokens[-1] not in ('and', 'or', '&', '|', '('):
+                    parsed_tokens.append('&') # NOTs have implicit ANDs too
                 if i + 1 < len(tokens):
                     next_tok = tokens[i + 1].lower()
                     if next_tok.isalpha():
-                        # It's a term
                         stemmed = self.stemmer.stem(next_tok)
-                        if stemmed in self.index:
-                            term_set_str = f"set({list(self.index[stemmed])})"
-                        else:
-                            term_set_str = "set()"
+                        term_set_str = f"set({list(self.index.get(stemmed, []))})"
                         parsed_tokens.append(f"({all_docs_str} - {term_set_str})")
-                        i += 2  # Skip the next token
+                        i += 2
                         continue
                     elif next_tok == '(':
                         subexpr_tokens, offset = self._gather_parenthesized(tokens, i + 1)
-                        subexpr_str = self._build_subexpression(subexpr_tokens, all_docs_str)
+                        subexpr_str = self._parse_tokens_to_expression(subexpr_tokens, all_docs_str)
                         parsed_tokens.append(f"({all_docs_str} - ({subexpr_str}))")
-                        i += (1 + offset)
+                        i += offset + 1  
                         continue
                     else:
+                        # Some other token after NOT (maybe punctuation or something)
                         parsed_tokens.append(f"({all_docs_str} - set())")
                         i += 2
                         continue
@@ -146,7 +140,16 @@ class InvertedIndex:
                     parsed_tokens.append("set()")
             i += 1
 
-        expression = " ".join(parsed_tokens)
+        return " ".join(parsed_tokens)
+
+    def boolean_retrieve(self, query_str):
+        # Universal set of doc IDs
+        all_docs = set(self.reverse_doc_id_map.keys())
+        all_docs_str = f"set({list(all_docs)})"
+
+        tokens = nltk.word_tokenize(query_str)
+        expression = self._parse_tokens_to_expression(tokens, all_docs_str)
+        
         try:
             results = eval(expression)
         except Exception as e:
@@ -159,17 +162,16 @@ class InvertedIndex:
         paren_count = 0
         i = start_index
         while i < len(tokens):
-            t = tokens[i].lower()
+            t = tokens[i]
             subexpr_tokens.append(t)
             if t == '(':
                 paren_count += 1
             elif t == ')':
                 paren_count -= 1
-                if paren_count < 0:
-                    # Found the matching one
-                    return (subexpr_tokens, i - start_index)
+                if paren_count == 0:
+                    return subexpr_tokens, (i - start_index + 1)
             i += 1
-        return (subexpr_tokens, i - start_index - 1)
+        raise Exception("Unmatched parentheses")
 
     def _build_subexpression(self, subexpr_tokens, all_docs_str):
         if subexpr_tokens and subexpr_tokens[0] == '(':
@@ -177,6 +179,29 @@ class InvertedIndex:
         if subexpr_tokens and subexpr_tokens[-1] == ')':
             subexpr_tokens = subexpr_tokens[:-1]
         return " ".join(subexpr_tokens)
+    
+    def process_query_file(self, query_file_path):
+        results = []
+        try:
+            with open(query_file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    query = line.strip()
+                    if query and not query.startswith('#'):
+                        try:
+                            matching_docs = self.boolean_retrieve(query)
+                            results.append({
+                                'query': query,
+                                'matches': sorted(
+                                    [self.reverse_doc_id_map[doc_id] 
+                                    for doc_id in matching_docs]
+                                )
+                            })
+                        except Exception as e:
+                            print(f"Error processing query '{query}': {e}")
+                            continue
+        except Exception as e:
+            print(f"Error reading query file: {e}")
+        return results
 
 ###############################################################################
 # Building the Inverted Index
@@ -259,7 +284,7 @@ def build_inverted_index_parallel(directory_path, stop_words, max_workers=None):
 # Run Function - Orchestrating the Indexing + Querying
 ###############################################################################
 
-def run(stopwords_dir, documents_dir, index_file_path,
+def run(stopwords_dir, documents_dir, index_file, query_file=None,
         use_existing_index=False, use_parallel=True):
     try:
         nltk.data.find('tokenizers/punkt_tab/english.pickle')
@@ -268,10 +293,10 @@ def run(stopwords_dir, documents_dir, index_file_path,
 
     print_banner()
     stop_words = load_stopwords(stopwords_dir)
-    if use_existing_index and os.path.exists(index_file_path):
+    if use_existing_index and os.path.exists(index_file):
         print("[+] Loading existing index from file...")
         inv_index = InvertedIndex()
-        inv_index.load(index_file_path)
+        inv_index.load(index_file)
     else:
         print("[+] Building a new index from the documents directory...")
         if use_parallel:
@@ -285,7 +310,7 @@ def run(stopwords_dir, documents_dir, index_file_path,
             inv_index = build_inverted_index(documents_dir, stop_words=stop_words)
 
         print("[+] Saving the new index to disk...")
-        inv_index.save(index_file_path)
+        inv_index.save(index_file)
 
     size_in_bytes = inv_index.get_index_size_in_bytes()
     size_in_mb = size_in_bytes / (1024 * 1024)
@@ -294,22 +319,35 @@ def run(stopwords_dir, documents_dir, index_file_path,
 
     display_top_n_terms(inv_index, n=10)
 
-    # Query and Retrieval
-    while True:
-        query_str = input("\nEnter a Boolean query (or type 'exit' to quit): ")
-        if query_str.lower() == 'exit':
-            break
-        matching_doc_ids = inv_index.boolean_retrieve(query_str)
-        if not matching_doc_ids:
-            print("No documents matched your query.")
-        else:
-            matching_filenames = [
-                inv_index.reverse_doc_id_map[doc_id] 
-                for doc_id in sorted(matching_doc_ids)
-            ]
-            print(f"Documents matching '{query_str}':")
-            for fname in matching_filenames:
-                print(f"  - {fname}")
+    # Checking for Query list
+    if query_file:
+        print(f"\nProcessing queries from {query_file}")
+        results = inv_index.process_query_file(query_file)
+        for r in results:
+            print(f"\nQuery: {r['query']}")
+            if r['matches']:
+                print("Matches:")
+                for doc in r['matches']:
+                    print(f"  - {doc}")
+            else:
+                print("No matches found.")
+    else:
+        # Prompted Query and Retrieval
+        while True:
+            query_str = input("\nEnter a Boolean query (or type 'exit' to quit): ")
+            if query_str.lower() == 'exit':
+                break
+            matching_doc_ids = inv_index.boolean_retrieve(query_str)
+            if not matching_doc_ids:
+                print("No documents matched your query.")
+            else:
+                matching_filenames = [
+                    inv_index.reverse_doc_id_map[doc_id] 
+                    for doc_id in sorted(matching_doc_ids)
+                ]
+                print(f"Documents matching '{query_str}':")
+                for fname in matching_filenames:
+                    print(f"  - {fname}")
 
 if __name__ == "__main__":
     run()
