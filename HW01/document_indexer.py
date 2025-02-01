@@ -1,28 +1,39 @@
 import os
-import sys
+import argparse
+from sys import getsizeof
+from collections import Counter, defaultdict
+from collections.abc import Iterable
 import pickle
+import json
 import nltk
-from collections import Counter
 import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
+from query_parser import QueryParser, query_parser_demo
 
 ###############################################################################
 # Utility Functions
 ###############################################################################
 
 def print_banner():
-    print("================================================")
-    print("=============== CSC790-IR Homework 01 ===============")
-    print("First Name: Matthew")
-    print("Last Name : Branson")
-    print("================================================")
+    print("""
+=================== CSC790-IR Homework 01 ===================
+First Name: Matthew
+Last Name : Branson
+=============================================================
+""")
 
 def load_stopwords(stop_words_file):
+    print(f"[+] Loading stopwords from file '{stop_words_file}'...")
     stopwords = set()
-    with open(stop_words_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            w = line.strip()
-            if w:
-                stopwords.add(w.lower())
+    try:
+        with open(stop_words_file, encoding="utf-8") as file:
+            stopwords = {line.strip().lower() for line in file if line.strip()}
+    except FileNotFoundError:
+        print(f"[!] Error: The file {stop_words_file} was not found.")
+    except IOError as e:
+        print(f"[!] Error: An I/O error occurred while reading {stop_words_file}: {e}")
+    except Exception as e:
+        print(f"[!] An unexpected error occurred: {e}")
     return stopwords
 
 def display_top_n_terms(inv_index, n=10):
@@ -36,27 +47,20 @@ def display_top_n_terms(inv_index, n=10):
 
 class InvertedIndex:
     def __init__(self, stop_words=None):
-        self.index = {}               # {term: set_of_docIDs}
+        self.index = defaultdict(set) # {term: set(doc_ids)}
         self.doc_id_map = {}          # {filename: doc_id}
         self.reverse_doc_id_map = {}  # {doc_id: filename}
-        self.stop_words = stop_words if stop_words else set()
+        self.stop_words = stop_words or set()
         self.stemmer = nltk.stem.PorterStemmer()
         self.term_frequency = Counter()
 
     def add_document(self, doc_id, text):
-        tokens = nltk.word_tokenize(text)
-        normalized_tokens = []
-        for token in tokens:
-            lower = token.lower()
-            if lower not in self.stop_words and lower.isalpha():
-                stemmed = self.stemmer.stem(lower)
-                normalized_tokens.append(stemmed)
-
-        for term in normalized_tokens:
-            if term not in self.index:
-                self.index[term] = set()
+        tokens = [self.stemmer.stem(word.lower()) 
+                for word in nltk.word_tokenize(text) 
+                if word.isalpha() and word.lower() not in self.stop_words]
+        for term in set(tokens):
             self.index[term].add(doc_id)
-            self.term_frequency[term] += 1
+        self.term_frequency.update(tokens)
 
     def get_document_count(self):
         return len(self.doc_id_map)
@@ -64,8 +68,36 @@ class InvertedIndex:
     def get_vocabulary_size(self):
         return len(self.index)
     
-    def get_index_size_in_bytes(self):
-        return sys.getsizeof(self.index)
+    def get_index_size_in_bytes(self, obj=None): 
+        seen = set()
+        
+        def sizeof(obj):
+            if id(obj) in seen:
+                return 0
+            seen.add(id(obj))
+            size = getsizeof(obj)
+            
+            if isinstance(obj, dict):
+                size += sum(sizeof(k) + sizeof(v) for k, v in obj.items())
+            elif isinstance(obj, (set, list, tuple)):
+                size += sum(sizeof(x) for x in obj)
+            elif isinstance(obj, str):
+                # String size is already included in getsizeof
+                pass
+            elif isinstance(obj, Iterable) and not isinstance(obj, (str, bytes)):
+                size += sum(sizeof(x) for x in obj)
+                
+            return size
+        
+        if obj is None:
+            total = sizeof(self.index)
+            total += sizeof(self.doc_id_map)
+            total += sizeof(self.reverse_doc_id_map)
+            total += sizeof(self.stop_words)
+            total += sizeof(self.term_frequency)
+            return total
+        
+        return sizeof(obj)
 
     def save(self, filepath):
         with open(filepath, 'wb') as f:
@@ -86,122 +118,29 @@ class InvertedIndex:
             self.stop_words = data['stop_words']
             self.term_frequency = data['term_frequency']
 
-    def _parse_tokens_to_expression(self, tokens, all_docs_str):
-        parsed_tokens = []
-        i = 0
-        while i < len(tokens):
-            token = tokens[i].lower()
-            
-            # Missing operator? Assume it's an AND
-            if parsed_tokens and token not in ('and', 'or', 'not', ')', '|', '&', '('):
-                last_token = parsed_tokens[-1]
-                if last_token not in ('and', 'or', '(', '|', '&'):
-                    parsed_tokens.append('&')
-
-            if token == 'and':
-                parsed_tokens.append('&')
-            elif token == 'or':
-                parsed_tokens.append('|')
-            elif token == 'not':
-                if parsed_tokens and parsed_tokens[-1] not in ('and', 'or', '&', '|', '('):
-                    parsed_tokens.append('&') # NOTs have implicit ANDs too
-                if i + 1 < len(tokens):
-                    next_tok = tokens[i + 1].lower()
-                    if next_tok.isalpha():
-                        stemmed = self.stemmer.stem(next_tok)
-                        term_set_str = f"set({list(self.index.get(stemmed, []))})"
-                        parsed_tokens.append(f"({all_docs_str} - {term_set_str})")
-                        i += 2
-                        continue
-                    elif next_tok == '(':
-                        subexpr_tokens, offset = self._gather_parenthesized(tokens, i + 1)
-                        subexpr_str = self._parse_tokens_to_expression(subexpr_tokens, all_docs_str)
-                        parsed_tokens.append(f"({all_docs_str} - ({subexpr_str}))")
-                        i += offset + 1  
-                        continue
-                    else:
-                        # Some other token after NOT (maybe punctuation or something)
-                        parsed_tokens.append(f"({all_docs_str} - set())")
-                        i += 2
-                        continue
-                else:
-                    # Your query ended with NOT? That's nice for you. I hope that works out.
-                    parsed_tokens.append(f"({all_docs_str} - set())")
-            elif token in ('(', ')'):
-                parsed_tokens.append(token)
-            else:
-                if token.isalpha():
-                    stemmed = self.stemmer.stem(token)
-                    if stemmed in self.index:
-                        parsed_tokens.append(f"set({list(self.index[stemmed])})")
-                    else:
-                        parsed_tokens.append("set()")
-                else:
-                    parsed_tokens.append("set()")
-            i += 1
-
-        return " ".join(parsed_tokens)
-
     def boolean_retrieve(self, query_str):
-        # Universal set of doc IDs
-        all_docs = set(self.reverse_doc_id_map.keys())
-        all_docs_str = f"set({list(all_docs)})"
-
-        tokens = nltk.word_tokenize(query_str)
-        expression = self._parse_tokens_to_expression(tokens, all_docs_str)
-        
+        all_docs = set(self.doc_id_map.values())
+        parser = QueryParser(self.index, self.stop_words, self.stemmer, all_docs)
         try:
-            results = eval(expression)
+            return parser.parse(query_str)
         except Exception as e:
             print(f"[!] Could not parse query expression '{query_str}': {e}")
-            results = set()
-        return results
+            return set()
 
-    def _gather_parenthesized(self, tokens, start_index):
-        subexpr_tokens = []
-        paren_count = 0
-        i = start_index
-        while i < len(tokens):
-            t = tokens[i]
-            subexpr_tokens.append(t)
-            if t == '(':
-                paren_count += 1
-            elif t == ')':
-                paren_count -= 1
-                if paren_count == 0:
-                    return subexpr_tokens, (i - start_index + 1)
-            i += 1
-        raise Exception("Unmatched parentheses")
-
-    def _build_subexpression(self, subexpr_tokens, all_docs_str):
-        if subexpr_tokens and subexpr_tokens[0] == '(':
-            subexpr_tokens = subexpr_tokens[1:]
-        if subexpr_tokens and subexpr_tokens[-1] == ')':
-            subexpr_tokens = subexpr_tokens[:-1]
-        return " ".join(subexpr_tokens)
-    
-    def process_query_file(self, query_file_path):
-        results = []
-        try:
-            with open(query_file_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    query = line.strip()
-                    if query and not query.startswith('#'):
-                        try:
-                            matching_docs = self.boolean_retrieve(query)
-                            results.append({
-                                'query': query,
-                                'matches': sorted(
-                                    [self.reverse_doc_id_map[doc_id] 
-                                    for doc_id in matching_docs]
-                                )
-                            })
-                        except Exception as e:
-                            print(f"Error processing query '{query}': {e}")
-                            continue
-        except Exception as e:
-            print(f"Error reading query file: {e}")
-        return results
+    def export_to_json(self, filepath):
+        export_data = {
+            "metadata": {
+                "document_count": self.get_document_count(),
+                "vocabulary_size": self.get_vocabulary_size(),
+                "index_size_bytes": self.get_index_size_in_bytes(),
+                "document_mapping": self.doc_id_map
+            },
+            "term_frequencies": dict(self.term_frequency),
+            "index": {term: sorted(list(doc_ids)) 
+                    for term, doc_ids in self.index.items()}
+        }
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(export_data, f, indent=2, sort_keys=True)
 
 ###############################################################################
 # Building the Inverted Index
@@ -212,15 +151,33 @@ def build_inverted_index(directory_path, stop_words):
     inv_index = InvertedIndex(stop_words=stop_words)
     current_doc_id = 1
 
-    for filename in os.listdir(directory_path):
+    try:
+        files = os.listdir(directory_path)
+    except FileNotFoundError:
+        print(f"[!] Error: Directory {directory_path} not found")
+        return inv_index
+    except PermissionError:
+        print(f"[!] Error: Permission denied accessing {directory_path}")
+        return inv_index
+
+    for filename in files:
+        if not filename.endswith('.txt'):
+            continue
+        
         filepath = os.path.join(directory_path, filename)
-        if filename.endswith('.txt'):
+        try:
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                 text = f.read()
+            if not text.strip():
+                print(f"[!] Warning: Empty file {filename}")
+                continue         
             inv_index.doc_id_map[filename] = current_doc_id
             inv_index.reverse_doc_id_map[current_doc_id] = filename
             inv_index.add_document(doc_id=current_doc_id, text=text)
             current_doc_id += 1
+        except Exception as e:
+            print(f"[!] Error processing {filename}: {e}")
+            continue
 
     return inv_index
 
@@ -228,7 +185,7 @@ def process_document_chunk(chunk_data):
     chunk, start_id, directory_path, stop_words = chunk_data
     local_idx = InvertedIndex(stop_words=stop_words)
     current_id = start_id
-    
+    errors = [] # Aggregate errors now
     for filename in chunk:
         filepath = os.path.join(directory_path, filename)
         try:
@@ -239,17 +196,17 @@ def process_document_chunk(chunk_data):
             local_idx.add_document(current_id, text)
             current_id += 1
         except Exception as e:
-            print(f"Error processing {filename}: {e}")
+            errors.append(f"{filename}: {str(e)}")
             continue
-            
     return {
         'index': local_idx.index,
         'doc_id_map': local_idx.doc_id_map,
         'reverse_doc_id_map': local_idx.reverse_doc_id_map,
-        'term_frequency': local_idx.term_frequency
+        'term_frequency': local_idx.term_frequency,
+        'errors': errors
     }
 
-def build_inverted_index_parallel(directory_path, stop_words, max_workers=None):    
+def build_inverted_index_parallel(directory_path, stop_words, max_workers=None):
     if max_workers is None:
         max_workers = mp.cpu_count()
     
@@ -264,16 +221,14 @@ def build_inverted_index_parallel(directory_path, stop_words, max_workers=None):
         for i, chunk in enumerate(doc_chunks)
     ]
     
-    with mp.Pool(max_workers) as pool:
-        results = pool.map(process_document_chunk, chunk_data)
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(process_document_chunk, chunk_data))
     
     for partial_index in results:
         inv_index.doc_id_map.update(partial_index['doc_id_map'])
         inv_index.reverse_doc_id_map.update(partial_index['reverse_doc_id_map'])
         
         for term, doc_ids in partial_index['index'].items():
-            if term not in inv_index.index:
-                inv_index.index[term] = set()
             inv_index.index[term].update(doc_ids)
         
         for term, freq in partial_index['term_frequency'].items():
@@ -284,15 +239,15 @@ def build_inverted_index_parallel(directory_path, stop_words, max_workers=None):
 # Run Function - Orchestrating the Indexing + Querying
 ###############################################################################
 
-def run(stopwords_dir, documents_dir, index_file, query_file=None,
-        use_existing_index=False, use_parallel=True):
+def run(documents_dir, stopwords_file, 
+        index_file, use_existing_index, use_parallel, top_n):
     try:
         nltk.data.find('tokenizers/punkt_tab/english.pickle')
     except LookupError:
         nltk.download('punkt_tab')
 
     print_banner()
-    stop_words = load_stopwords(stopwords_dir)
+    stop_words = load_stopwords(stopwords_file)
     if use_existing_index and os.path.exists(index_file):
         print("[+] Loading existing index from file...")
         inv_index = InvertedIndex()
@@ -301,11 +256,7 @@ def run(stopwords_dir, documents_dir, index_file, query_file=None,
         print("[+] Building a new index from the documents directory...")
         if use_parallel:
             print(f"[+] Building index using {mp.cpu_count()} CPU cores...")
-            inv_index = build_inverted_index_parallel(
-                documents_dir, 
-                stop_words=stop_words,
-                max_workers=None  # Will use all available cores
-            )
+            inv_index = build_inverted_index_parallel(documents_dir, stop_words=stop_words)
         else:
             inv_index = build_inverted_index(documents_dir, stop_words=stop_words)
 
@@ -317,37 +268,43 @@ def run(stopwords_dir, documents_dir, index_file, query_file=None,
     print(f"[+] Inverted Index built/loaded. Size in memory: "
           f"{size_in_bytes} bytes ({size_in_mb:.2f} MB)")
 
-    display_top_n_terms(inv_index, n=10)
+    display_top_n_terms(inv_index, n=top_n)
 
-    # Checking for Query list
-    if query_file:
-        print(f"\nProcessing queries from {query_file}")
-        results = inv_index.process_query_file(query_file)
-        for r in results:
-            print(f"\nQuery: {r['query']}")
-            if r['matches']:
-                print("Matches:")
-                for doc in r['matches']:
-                    print(f"  - {doc}")
-            else:
-                print("No matches found.")
-    else:
-        # Prompted Query and Retrieval
-        while True:
-            query_str = input("\nEnter a Boolean query (or type 'exit' to quit): ")
-            if query_str.lower() == 'exit':
-                break
-            matching_doc_ids = inv_index.boolean_retrieve(query_str)
-            if not matching_doc_ids:
-                print("No documents matched your query.")
-            else:
-                matching_filenames = [
-                    inv_index.reverse_doc_id_map[doc_id] 
-                    for doc_id in sorted(matching_doc_ids)
-                ]
-                print(f"Documents matching '{query_str}':")
-                for fname in matching_filenames:
-                    print(f"  - {fname}")
+    print("[+] Exporting index to JSON for inspection...")
+    json_path = index_file.replace('.pkl', '.json')
+    inv_index.export_to_json(json_path)
+
+    query_parser_demo(inv_index, inv_index.stemmer)
+
+def main(documents_dir=None, stopwords_file=None, 
+         index_file=None, use_existing_index=False, use_parallel=True, top_n=10):
+    if documents_dir is None or stopwords_file is None or index_file is None:
+        parser = argparse.ArgumentParser(
+            description='Build and query an inverted index from text documents.')
+        parser.add_argument('--documents_dir', default='documents',
+                          help='Directory containing documents to index')
+        parser.add_argument('--stopwords_file', default='stopwords.txt',
+                          help='File containing stopwords')
+        parser.add_argument('--index_file', default='index.pkl',
+                          help='Path to save/load the index')
+        parser.add_argument('--no_parallel', action='store_true',
+                          help='Disable parallel processing')
+        parser.add_argument('--use_existing', action='store_true',
+                          help='Use existing index if available')
+        parser.add_argument('--top_n', type=int, default=10,
+                          help='Number of most frequent terms to display')
+        
+        args = parser.parse_args()
+        documents_dir = args.documents_dir
+        stopwords_file = args.stopwords_file
+        index_file = args.index_file
+        use_existing_index = args.use_existing
+        use_parallel = not args.no_parallel
+        top_n = args.top_n
+
+    run(documents_dir, stopwords_file, index_file, 
+        use_existing_index=use_existing_index, use_parallel=use_parallel, 
+        top_n=top_n)
 
 if __name__ == "__main__":
-    run()
+    main()

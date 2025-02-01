@@ -16,7 +16,7 @@
 
 - Looks like my naive approach is going to require an nltk tokenizer called 'punkt_tab' to be present. I'm just checking for it and downloading as necessary. This is apparently fine for class assignments, but I worry that it might be a problem for deployment in real-world projects - potentially setting off antivirus warnings if packaged into a single executable. 
 
-- For data, I pulled a list of public domain books from Project Gutenberg, using a test_data.py file that I borrowed from a past project - the the simple-gpt demo in the ml-demos repo on my github. I got this overall implementation running right before class and was running two versions when testing on my laptop during class with two different book lists (one just a few novels, the other being nearly a hundred), and while there wasn't much difference in the smaller dataset, it's kind of wild how much faster my desktop performed comparably for the larger dataset. The large collection indexing took only moments on the desktop, but ended up taking over two hours on my laptop - which is crazy! I don't think there should be that much disparity between them. I'm not sure if it's the processor or the RAM or if I'm a moron and hadn't notice some other variable or function I'd changed. I'll profile this later to make sure the final version doesn't have a catastrophic goof in there.
+- For data, I pulled a list of public domain books from Project Gutenberg, using a test_data.py file that I borrowed from a past project - the the simple-gpt demo in the ml-demos repo on my github. I got this overall implementation running right before class and was running two versions when testing on my laptop during class with two different book lists (one just a few novels, the other being nearly a hundred), and while there wasn't much difference in the smaller dataset, it's kind of wild how much faster my desktop performed comparably for the larger dataset. The large collection indexing took only moments on the desktop, but ended up taking over two hours on my laptop - which is crazy! I don't think there should be that much disparity between them. I'm not sure if it's the processor or the RAM or if I'm a moron and hadn't noticed some other variable or function I'd changed. I'll profile this later to make sure the final version doesn't have a catastrophic goof in there.
 
 - The index_builder.py is pretty much a direct replication of the workflow as presented in the lecture presentation, using the nltk examples from the end almost verbatim. I just tossed a handful of stopwords at it that occurred to me at the time, but I'll look at other options later. Porter stemmer is all we talked about in class, but I also saw a Lancaster stemmer and a Snowball stemmer (Improved Porter? Improved how?), so I'll look into those as well.
 
@@ -67,7 +67,7 @@ Alternatively, I could use the multiprocessing module. I don't know enough yet t
 
 - Interestingly, since this multithreaded version will assign each worker their own instance of an InvertedIndex object, they were all separately checking for that nltk punkt_tab file, spamming the terminal as all the workers from the different cores checked to see if the tokenizer was there. So, I thought, "Hey, let's put it at the module level with the imports." But that too was causing the workers to all check for the tokenizer. Evidently, when creating a new process using multiprocessing, each worker executes the full module from the top. Putting it just in the main method before the rest of the orchestration avoided the multiple calls.
 
-- Still need to investigate the performance disparity between desktop and laptop from the initial implementation. I'm going to go bottleneck hunting.
+- Still need to investigate the performance disparity between desktop and laptop from the initial implementation.
 
 ### January 28, 2025, 11:49 AM
 
@@ -91,8 +91,6 @@ It shows:
 - Compare document IDs, and when they match, add to the answer
 - When they don't match, advance the pointer of the list with the smaller document ID
 
-Well, duh...
-
 I don't like it though. There's nothing wrong with it on its face, and I imagine something similar is already happening under the hood when using Python sets. The key issue is that Python sets are implemented in C, and trying to reinvent the wheel here is only going to slow things down comparably. I'm going to keep playing around and see if I can implement logical NOTs and more robust grouping while continuing to use Python sets.
 
 - So, set theory... To handle NOTs, we need a universal set of document IDs. When we see a NOT operator, we can interpret it as the universal set minus some set of terms, essentially just checking for intersection with the complement. This seems to work as expected, but I've surely just not yet discovered all the ways to break it.
@@ -101,7 +99,7 @@ I don't like it though. There's nothing wrong with it on its face, and I imagine
 
 - Lastly, I put in a quick check beforehand for if an operator is missing between two terms, and I am inserting an AND to handle it like Google does.
 
-### Current State of the Project
+### January 29, 2025, 2:52 AM
 
 I created a smaller set of documents so I could more easily test the query logic, and I set up a query list so I could just punch through all the query variations each run to see if they were working as expected. This revealed a few issues:
 
@@ -109,4 +107,14 @@ I created a smaller set of documents so I could more easily test the query logic
 - NOTs that were preceding grouped ORs were coming up malformed. Really, I had two processes for expression interpretations occurring - a more rigorous one at the top scope, but a hacky one for the subexpressions. I needed to extract that logic out and just use it for both cases, so I created the parse_tokens_to_expression() function and call it wherever needed.
 - I was also getting an off-by-one error in the NOT handling logic in some cases for the paren_count, easily fixed though by just adjusting the conditional for when returning how many tokens were consumed.
 
-After fixing these issues, I stress-tested the query parser with increasingly complex cases: deeply nested parentheses with mixed operators, case sensitivity and irregular spacing, malformed queries with extra punctuation and operators, complex combinations of NOTs and parenthetical grouping. It didn't explode. 
+After fixing these issues, I stress-tested the query parser with increasingly complex cases: deeply nested parentheses with mixed operators, case sensitivity and irregular spacing, malformed queries with extra punctuation and operators, complex combinations of NOTs and parenthetical grouping. It didn't explode.
+
+### Current State of the Project
+
+Okay, I shouldn't be trusted to write a query parser. I mean, using eval on user-generated input is practically inviting arbitrary code execution, and while I felt like I was santizing everything, it's just a bad idea to leave it as even a hypothetical vulnerability. It's not even part of the actual assignment and just a relic from my own experiments before the assignment was even given. That being the case, I've extracted it out to a separate file to unclutter the graded portion of the assignment and rebuilt it to use a simpler implementation for demonstration purposes, starting from an example for how a query parser might be implemented by a sane programmer. It's not as versatile as the eval version, but it's safer. I can always improve this approach later, but at least it's getting off on the right foot. I ended up removing the query_list option too as it felt like clutter that distracted from the graded parts of the assignment. I may reimplement it in the query_parser.py file later.
+
+I decided to go back and look at my approach to parallelization too, since I never did a get a good chance to compare the mp.Pool approach with a working implementation of ProcessPoolExecuter. I noted how the mp.Pool approach was forcing serialization of the entire object per worker, and using a large enough dataset, it was actually going to cause worse performance than the baseline sequential implementation. I switched it out for ProcessPoolExecuter, and it's functioning as expected. I'll do some measurements next. I will try another implementaiton later with dynamic chunking too, but I doubt it will affect things greatly with the given dataset since the documents are all roughly the same size.
+
+This morning's quiz taught me something. I am a moron when it comes to to calculating the memory footprint of whatever I'm working on. I come home then, looked at my code, and I recognized I was totally miscalculating the memory usage of the index here as well. I was only getting the size of the defaultdict object, not the actual size of the strings and integers stored in it. The contained sets and other structures were not being accounted for at all. I was reporting sizes as low as 0.3 MB, which I now realize after traversing the index and summing the sizes of the contained objects, should be reported closer to 6.14 MB. I'd thought also to just dump the pickle file and check the size of that, but I realized that the pickle file is compressed and not a good representation of the actual memory usage.
+
+Otherwise, I've made some structural changes to suit the assignment submission, bringing the main method back into the indexer's file and removing the main.py wrapper. Since the assignment doesn't actually mention anything about querying, I don't really know how the professor intends to inspect the results. The index is kept as a pickle file, which he can't directly inspect, so I added a method to export the index and its metadata to json. I also added some argument parsing to the main method to allow for customization at the command line. I adjusted a few container definitions also that simplified some of the checks for object existence and allowed more efficient loading as sets, and I also added a few more status printouts and improved error handling.
