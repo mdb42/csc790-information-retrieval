@@ -3,7 +3,7 @@ import nltk
 class QueryParser:
     def __init__(self, index, stopwords, stemmer, all_docs):
         self.index = index
-        self.stop_words = stopwords
+        self.stopwords = stopwords
         self.stemmer = stemmer
         self.all_docs = all_docs
         self.tokens = []
@@ -15,7 +15,7 @@ class QueryParser:
             lower = word.lower()
             if lower in {'and', 'or', 'not', '(', ')'}:
                 self.tokens.append(lower)
-            elif word.isalpha() and lower not in self.stop_words:
+            elif word.isalpha() and lower not in self.stopwords:
                 self.tokens.append(self.stemmer.stem(lower))
         self.current = 0
         return self.parse_expression()
@@ -76,17 +76,29 @@ class QueryParser:
         """Check if a token is a boolean operator."""
         return token.lower() in {'and', 'or', 'not'}
 
-def query_parser_demo(inv_index, stemmer):
+def boolean_retrieve(index, query_str):
+    stopwords = index.stopwords
+    stemmer = nltk.stem.PorterStemmer()
+    
+    all_docs = set(index.doc_id_map.values())
+    parser = QueryParser(index.index, stopwords, stemmer, all_docs)
+    try:
+        return parser.parse(query_str)
+    except Exception as e:
+        print(f"[!] Could not parse query expression '{query_str}': {e}")
+        return set()
+
+def query_parser_demo(index):
     while True:
         query_str = input("\nEnter a Boolean query (or type 'exit' to quit): ")
         if query_str.lower() == 'exit':
             break 
-        matching_doc_ids = inv_index.boolean_retrieve(query_str)
+        matching_doc_ids = boolean_retrieve(index, query_str)
         if not matching_doc_ids:
             print("No documents matched your query.")
         else:
             matching_filenames = [
-                inv_index.reverse_doc_id_map[doc_id] 
+                index.reverse_doc_id_map[doc_id] 
                 for doc_id in sorted(matching_doc_ids)
             ]
             plural = "s" if len(matching_filenames) != 1 else ""
