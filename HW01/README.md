@@ -11,9 +11,28 @@ NLTK 3.9.1
 
 ### Setup
 
-1. Place your text documents in a directory. By default, the program looks for a 'documents' folder in the same directory as the script.
+1. Create and activate a virtual environment to isolate the project dependencies:
 
-2. Ensure you have a stopwords file. By default, the program looks for 'stopwords.txt' in the same directory as the script.
+```bash
+# Create a new virtual environment
+python -m venv venv
+
+# Activate the virtual environment
+# On Unix/macOS:
+source venv/bin/activate
+# On Windows:
+venv\Scripts\activate
+```
+
+2. Install the required dependencies using pip:
+
+```bash
+pip install -r requirements.txt
+```
+
+3. Prepare your text documents in a directory. By default, the program looks for a 'documents' folder in the same directory as the script. The documents should be plain text files with .txt extensions.
+
+4. Ensure you have a stopwords file. By default, the program looks for 'stopwords.txt' in the same directory as the script. This file should contain one stopword per line.
 
 ### Running the Program
 
@@ -29,7 +48,7 @@ You can customize the behavior using command line arguments:
 
 For example, to specify a different documents directory, stopwords file, and index file, you could run:
 
-```
+```bash
 python inverted_index.py --documents_dir my_docs --stopwords_file my_stops.txt --index_file my_index.pkl
 ```
 
@@ -44,6 +63,7 @@ Available options:
 ### What You Should Expect To See
 
 When you run the program, you should see output similar to the following:
+
 ```
 =================== CSC790-IR Homework 01 ===================
 First Name: Matthew
@@ -57,15 +77,15 @@ Last Name : Branson
 [+] Saving index to file 'index.pkl'...
 [+] Exporting index to JSON for inspection...
 =============================================================
-[+] MEMORY USAGE REPORT
+[+] MEMORY USAGE BREAKDOWN
 -------------------------------------------------------------
-Inverted Index                       2,786,091 bytes  (2.66 MB)
-Document ID Map                        163,472 bytes  (0.16 MB)
-Reverse Document ID Map                107,492 bytes  (0.10 MB)
-Stopwords Set                           14,110 bytes  (0.01 MB)
-Term Frequency Counter                 208,948 bytes  (0.20 MB)
-Total Memory Usage                   3,280,113 bytes  (3.13 MB)
-Pickled (Compressed) Size              220,815 bytes  (0.21 MB)
+Inverted Index                    5944207 bytes  (5.67 MB)
+Document ID Map                    163332 bytes  (0.16 MB)
+Reverse Document ID Map            107492 bytes  (0.10 MB)
+Stopwords Set                       14110 bytes  (0.01 MB)
+Term Frequency Counter             208948 bytes  (0.20 MB)
+Total Memory Usage                6438089 bytes  (6.14 MB)
+Pickled (Compressed) Size          276676 bytes  (0.26 MB)
 =============================================================
 [+] TOP 10 FREQUENT TERMS
 -------------------------------------------------------------

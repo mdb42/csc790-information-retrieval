@@ -1,6 +1,13 @@
+"""
+CSC 790 Information Retrieval
+Homework 01: Building an Inverted Index - Support File
+Author: Matthew Branson
+Date: 02/05/2025
+"""
 import nltk
 
 class QueryParser:
+    """A simple boolean query parser for a document index."""
     def __init__(self, index, stopwords, stemmer, all_docs):
         self.index = index
         self.stopwords = stopwords
@@ -10,6 +17,11 @@ class QueryParser:
         self.current = 0
 
     def parse(self, query):
+        """Parse a boolean query and return the set of matching doc IDs.
+        
+        Args:
+            query (str): A boolean query string.
+        """
         self.tokens = []
         for word in nltk.word_tokenize(query):
             lower = word.lower()
@@ -21,6 +33,7 @@ class QueryParser:
         return self.parse_expression()
 
     def parse_expression(self):
+        """Parse an expression, which is a series of terms combined by AND and OR operators."""
         left = self.parse_term()
         
         while self.current < len(self.tokens) and self.tokens[self.current].lower() == 'or':
@@ -31,6 +44,7 @@ class QueryParser:
         return left
 
     def parse_term(self):
+        """Parse a term, which may be a single word or a NOT operator followed by a word."""
         left = self.parse_factor()
         
         while (self.current < len(self.tokens) and 
@@ -44,6 +58,7 @@ class QueryParser:
         return left
 
     def parse_factor(self):
+        """Parse a factor, which may be a word, a NOT operator followed by a word, or a parenthesized expression."""
         if self.current >= len(self.tokens):
             return set()
 
@@ -77,6 +92,15 @@ class QueryParser:
         return token.lower() in {'and', 'or', 'not'}
 
 def boolean_retrieve(index, query_str):
+    """Retrieve documents matching a boolean query.
+
+    Args:
+        index (InvertedIndex): An inverted index.
+        query_str (str): A boolean query string.
+
+    Returns:
+        set: The set of doc IDs matching the query.
+    """
     stopwords = index.stopwords
     stemmer = nltk.stem.PorterStemmer()
     
@@ -89,6 +113,11 @@ def boolean_retrieve(index, query_str):
         return set()
 
 def query_parser_demo(index):
+    """A simple command-line interface for the boolean query parser.
+
+    Args:
+        index (InvertedIndex): An inverted index.
+    """
     while True:
         query_str = input("\nEnter a Boolean query (or type 'exit' to quit): ")
         if query_str.lower() == 'exit':
@@ -104,15 +133,11 @@ def query_parser_demo(index):
             plural = "s" if len(matching_filenames) != 1 else ""
             print(f"\nFound {len(matching_filenames)} document{plural} matching '{query_str}':")
             
-            # Then display the results as a comma-separated list
             results_text = ", ".join(matching_filenames)
             
-            # If there are more than 4 results, break them into chunks
             if len(matching_filenames) > 4:
-                # Break into chunks of 3 for display
                 chunks = [matching_filenames[i:i+3] for i in range(0, len(matching_filenames), 3)]
                 for chunk in chunks:
                     print("  " + ", ".join(chunk))
             else:
-                # For fewer results, just show them all on one line
                 print(f"  {results_text}")
