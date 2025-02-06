@@ -119,7 +119,7 @@ This morning's quiz taught me something. I am a moron when it comes to to calcul
 
 Otherwise, I've made some structural changes to suit the assignment submission, bringing the main method back into the indexer's file and removing the main.py wrapper. Since the assignment doesn't actually mention anything about querying, I don't really know how the professor intends to inspect the results. The index is kept as a pickle file, which he can't directly inspect, so I added a method to export the index and its metadata to json. I also added some argument parsing to the main method to allow for customization at the command line. I adjusted a few container definitions also that simplified some of the checks for object existence and allowed more efficient loading as sets, and I also added a few more status printouts and improved error handling.
 
-### Current State of the Project
+### February 5, 2024, 4:04 AM
 
 - Major refactoring of the project structure today, though most of it was just shuffling existing parts around for better encapsulation and streamlining the initialization process. Instead of orchestrating the index creation from outside the class, the constructor now manages the whole initialization workflow.Moved stopwords loading into a static method on the InvertedIndex class and fixed the chunk processing to now operate within the class as well. That was the only part that really required me to stop and think. I assume this is more efficient, but I am too tired to test it right now.
 
@@ -128,3 +128,10 @@ Otherwise, I've made some structural changes to suit the assignment submission, 
 - Improved error handling in the parallel processing implementation. Rather than letting errors in individual documents potentially disrupt the entire indexing process, I'm now collecting errors per chunk and reporting them after successful index construction.
 
 - The project is due tomorrow night, and so I don't have a lot of time left to make improvements. Some last minute changes I'll attempt tomorrow will be to try an alternative implementation of the index that uses a dictionary of dictionaries, accounting for term_frequency per doc_id, since that's really what we'd need for TF-IDF or BM25 scoring. Besides, since removing the eval-based query parser, the original rationale for using sets no longer applies. Otherwise, I'll probably adapt all the print statements to use a logging interface, add some unit tests, and draft new commenting and readme instructions.
+
+### Current State of the Project
+
+- Assignment submitted.
+- Note to self: When your bright idea to perform a last-minute fancy-pants refactoring comes together in one draft without a sign of trouble, don't trust it. Test it thoroughly before you spend the entire day extensively commenting a totally borked implementation. What beautiful comments they were too! I elaborated error handling throughout too! All lost to the ether now. It's like a construction crew spending all night and day demolishing and rebuilding a house, only to realize they were at the wrong address.
+- Realizing my mistake - which is too dumb to recount - literally in the eleventh hour, I rolled everything back to this morning's state, rushed through minimal commenting, zipped it up and hit send - barely devoting ten minutes to the final submission's documentation. It hurts! Oh well! I linked the journal in the readme, so if you're reading this now, professor, then... ooga booga! I'll do better next time.
+- On the bright side, not bound now by the prescriptions of any assignment, I can return to working on Lucid. I will probably tear this indexer apart, extract the document processing into a separate class, otherwise compartmentalizing everything along the boundaries defined in the IIR textbook's workflow diagram.
