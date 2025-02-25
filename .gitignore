@@ -4,7 +4,12 @@ __pycache__/
 *.pyo
 .DS_Store
 .env
-HW01/documents/
+documents/
 index.pkl
 index.json
 setup_requirements.bat
+HW03/
+HW04/
+config.json
+queries.txt
+results.txt

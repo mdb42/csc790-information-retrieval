@@ -1,10 +1,3 @@
-"""
-CSC 790 Information Retrieval
-Homework 01: Building an Inverted Index
-Author: Matthew Branson
-Date: 02/05/2025
-"""
-
 import os
 import argparse
 from sys import getsizeof
@@ -16,7 +9,7 @@ import json
 import nltk
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
-from HW01.query_parser import query_parser_demo
+# from query_parser import query_parser_demo
 
 #################################################################
 # Utility Functions
@@ -450,7 +443,7 @@ def main(documents_dir=None, stopwords_file=None,
                           use_existing_index=use_existing_index, use_parallel=use_parallel,
                           stopwords=stopwords)
     display_info(index, top_n)
-    query_parser_demo(index)
+    # query_parser_demo(index)
 
 if __name__ == "__main__":
     main()
