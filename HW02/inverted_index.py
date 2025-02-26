@@ -3,11 +3,6 @@ CSC 790 Information Retrieval
 Homework 02: Building a Basic Search System - Support File
 Author: Matthew Branson
 Date: 02/26/2025
-
-Changes:
-I edited out the functions that were not needed for this assignment and adapted the
-print statements to be logging statements. The add_document function was also updated
-for readability to more explicitly detail the steps as shown in the diagram.
 """
 
 import os
@@ -55,12 +50,12 @@ class InvertedIndex:
             IOError: If an I/O error occurs while reading the stopwords file.
             Exception: If an unexpected error occurs during initialization
         """
-        self.index = defaultdict(set)  # {term: set(doc_ids)}
+        self.index = defaultdict(dict)  # {term: {doc_id: tf}}
         self.doc_id_map = {}           # {filename: doc_id}
         self.reverse_doc_id_map = {}   # {doc_id: filename}
         self.stopwords = stopwords or set()
         self.stemmer = nltk.stem.PorterStemmer()
-        self.term_frequency = Counter()
+        self.collection_term_frequency = Counter()
 
         if use_existing_index and index_file and os.path.exists(index_file):
             logging.info("Loading existing index from file...")
@@ -105,45 +100,31 @@ class InvertedIndex:
         return stopwords
 
     def add_document(self, doc_id, text):
-        """
-        Adds a document to the inverted index.
-
-        Args:
-            doc_id (int): The unique document ID.
-            text (str): The text content of the document.
-        
-        Note:
-            This repesents the only significant change to the code from HW01, now
-            explicitly detailing the sequence of steps as shown in the diagram.
-        """
         # Tokenize
         tokens = nltk.word_tokenize(text)
-        
-        # Process tokens in the specific order shown in the diagram
         processed_tokens = []
         for word in tokens:
             # Lowercase
             word_lower = word.lower()
-            
             # Remove punctuation (keep only alphabetic)
             if not word.isalpha():
                 continue
-            
             # Remove stopwords
             if word_lower in self.stopwords:
                 continue
-            
             # Stemming
             stemmed_word = self.stemmer.stem(word_lower)
-            
             processed_tokens.append(stemmed_word)
+
+        # Count term frequencies in the document
+        term_counts = Counter(processed_tokens)
         
-        # Add to index
-        for term in set(processed_tokens):
-            self.index[term].add(doc_id)
-        
-        # Update term frequency
-        self.term_frequency.update(processed_tokens)
+        # Update the index with term frequencies
+        for term, count in term_counts.items():
+            # Frequencies per document
+            self.index[term][doc_id] = count
+            # Frequencies across the collection
+            self.collection_term_frequency[term] += count
 
     def save(self, filepath):
         """
@@ -159,7 +140,7 @@ class InvertedIndex:
                 'doc_id_map': self.doc_id_map,
                 'reverse_doc_id_map': self.reverse_doc_id_map,
                 'stopwords': self.stopwords,
-                'term_frequency': self.term_frequency
+                'collection_term_frequency': self.collection_term_frequency
             }, f)
 
     def load(self, filepath):
@@ -176,23 +157,16 @@ class InvertedIndex:
             self.doc_id_map = data['doc_id_map']
             self.reverse_doc_id_map = data['reverse_doc_id_map']
             self.stopwords = data['stopwords']
-            self.term_frequency = data['term_frequency']
+            self.collection_term_frequency = data.get('collection_term_frequency', Counter())
 
     def export_to_json(self, filepath):
-        """
-        Exports the inverted index to a JSON file for inspection.
-
-        Args:
-            filepath (str): The path to save the JSON file.
-        """
         logging.info("Exporting index to JSON for inspection...")
         export_data = {
             "metadata": {
-                "document_mapping": self.doc_id_map
+                "document_mapping": self.doc_id_map,
+                "collection_term_frequency": dict(self.collection_term_frequency)
             },
-            "term_frequencies": dict(self.term_frequency),
-            "index": {term: sorted(list(doc_ids))
-                      for term, doc_ids in self.index.items()}
+            "index": {term: dict(doc_counts) for term, doc_counts in self.index.items()}
         }
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(export_data, f, indent=2, sort_keys=True)
@@ -272,19 +246,13 @@ class InvertedIndex:
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             results = list(executor.map(self.__class__._process_document_chunk, chunk_data))
         logging.info("All chunks processed, merging results...")
-        processed_files = 0
         for partial_index in results:
-            processed_files += len(partial_index['doc_id_map'])
             self.doc_id_map.update(partial_index['doc_id_map'])
             self.reverse_doc_id_map.update(partial_index['reverse_doc_id_map'])
-            for term, doc_ids in partial_index['index'].items():
-                self.index[term].update(doc_ids)
-            for term, freq in partial_index['term_frequency'].items():
-                self.term_frequency[term] += freq
-            if partial_index['errors']:
-                for error in partial_index['errors']:
-                    logging.error(f"Error in parallel chunk: {error}")
-
+            for term, doc_counts in partial_index['index'].items():
+                self.index[term].update(doc_counts)
+            for term, count in partial_index['collection_term_frequency'].items():
+                self.collection_term_frequency[term] += count
     @staticmethod
     def _process_document_chunk(chunk_data):
         """
@@ -319,6 +287,6 @@ class InvertedIndex:
             'index': local_index.index,
             'doc_id_map': local_index.doc_id_map,
             'reverse_doc_id_map': local_index.reverse_doc_id_map,
-            'term_frequency': local_index.term_frequency,
+            'collection_term_frequency': local_index.collection_term_frequency,
             'errors': errors
         }
