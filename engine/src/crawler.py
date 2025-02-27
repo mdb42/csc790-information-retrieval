@@ -1,6 +1,6 @@
-"""
+""" 
 Web crawler module for search engine.
-Handles URL discovery, content fetching, and initial processing.
+Handles URL discovery, content fetching, and initial processing using multi-threading.
 """
 
 import requests
@@ -10,34 +10,21 @@ import time
 import logging
 import os
 from urllib.robotparser import RobotFileParser
-from collections import deque
+import queue
+import threading
 import hashlib
 
 class Crawler:
     """
-    Web crawler that fetches and processes web pages while respecting robots.txt.
-    
-    Features:
-    - Polite crawling with rate limiting
-    - robots.txt compliance
-    - URL normalization
-    - Content extraction
-    - Basic duplicate detection
+    Multi-threaded web crawler that fetches and processes web pages while respecting robots.txt.
     """
     
     def __init__(self, base_urls, output_dir="data/crawl", 
                  delay=1.0, max_pages=100, max_depth=3,
-                 user_agent="SearchEngineBot/1.0 (Educational Project)"):
+                 user_agent="SearchEngineBot/1.0 (Educational Project)",
+                 num_threads=10):
         """
         Initialize the crawler with starting URLs and configuration.
-        
-        Args:
-            base_urls (list): List of seed URLs to start crawling from
-            output_dir (str): Directory to store crawled content
-            delay (float): Minimum delay between requests to the same domain (seconds)
-            max_pages (int): Maximum number of pages to crawl
-            max_depth (int): Maximum link depth to crawl
-            user_agent (str): User agent string to use for HTTP requests
         """
         self.base_urls = [self._normalize_url(url) for url in base_urls]
         self.output_dir = output_dir
@@ -45,99 +32,140 @@ class Crawler:
         self.max_pages = max_pages
         self.max_depth = max_depth
         self.user_agent = user_agent
-        
-        # Create output directory if it doesn't exist
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Track crawled URLs and content hashes to avoid duplicates
+        self.num_threads = num_threads
+
+        # Thread-safe data structures
+        self.url_queue = queue.Queue()
         self.visited_urls = set()
         self.content_hashes = set()
-        
-        # Track last access time per domain for rate limiting
         self.domain_last_access = {}
-        
-        # Cache for robots.txt parsers
         self.robots_cache = {}
-        
-        # Track crawl failures
-        self.failure_count = 0
-        
-        # Setup logging
+        self.pages_crawled = 0
+
+        # Locks for thread safety
+        self.visited_lock = threading.Lock()
+        self.content_lock = threading.Lock()
+        self.domain_lock = threading.Lock()
+        self.robots_lock = threading.Lock()
+        self.crawl_lock = threading.Lock()
+        self.queue_lock = threading.Lock()
+
+        # Setup logging and directories
+        os.makedirs(output_dir, exist_ok=True)
         self.logger = logging.getLogger('crawler')
-    
+
     def start(self):
         """
-        Start the crawling process from the base URLs.
-        
-        Returns:
-            int: Number of pages successfully crawled
+        Start the multi-threaded crawling process.
         """
-        self.logger.info(f"Starting crawl with seeds: {self.base_urls}")
-        self.logger.info(f"Using user agent: {self.user_agent}")
+        self.logger.info(f"Starting crawl with {self.num_threads} threads")
         
-        # Queue of (url, depth) pairs to crawl
-        url_queue = deque([(url, 0) for url in self.base_urls])
-        pages_crawled = 0
-        
-        while url_queue and pages_crawled < self.max_pages:
-            url, depth = url_queue.popleft()
-            
-            # Check if we've reached max depth
-            if depth > self.max_depth:
-                continue
-            
-            # Skip if already visited
-            if url in self.visited_urls:
-                continue
-            
-            # Check if we're allowed to crawl this URL
-            if not self._can_fetch(url):
-                self.logger.info(f"Skipping {url} (robots.txt disallowed)")
-                continue
-            
-            # Respect rate limiting for the domain
-            self._respect_rate_limits(url)
-            
-            # Fetch the page
+        # Initialize queue with seed URLs
+        for url in self.base_urls:
+            self.url_queue.put((url, 0))
+
+        # Create and start worker threads
+        threads = []
+        for _ in range(self.num_threads):
+            thread = threading.Thread(target=self._worker)
+            thread.daemon = True
+            thread.start()
+            threads.append(thread)
+
+        # Wait for all URLs to be processed
+        self.url_queue.join()
+
+        # Stop workers
+        for _ in range(self.num_threads):
+            self.url_queue.put(None)
+
+        for thread in threads:
+            thread.join()
+
+        self.logger.info(f"Crawl completed. Pages crawled: {self.pages_crawled}")
+        return self.pages_crawled
+
+    def _worker(self):
+        """
+        Worker thread that processes URLs from the queue.
+        """
+        while True:
             try:
-                html, status_code = self._fetch_url(url)
-                
-                # Skip if fetch unsuccessful
-                if status_code != 200 or not html:
-                    self.logger.warning(f"Failed to fetch {url} (status: {status_code})")
-                    self.failure_count += 1
+                item = self.url_queue.get(timeout=1)
+                if item is None:  # Exit signal
+                    self.url_queue.task_done()
+                    break
+
+                url, depth = item
+
+                # Check depth limit
+                if depth > self.max_depth:
+                    self.url_queue.task_done()
                     continue
-                
-                # Check for duplicate content
-                content_hash = hashlib.md5(html.encode('utf-8')).hexdigest()
-                if content_hash in self.content_hashes:
-                    self.logger.info(f"Skipping {url} (duplicate content)")
-                    self.visited_urls.add(url)  # Mark as visited anyway
+
+                # Check if already visited
+                with self.visited_lock:
+                    if url in self.visited_urls:
+                        self.url_queue.task_done()
+                        continue
+
+                # Check crawl limits
+                with self.crawl_lock:
+                    if self.pages_crawled >= self.max_pages:
+                        self.url_queue.task_done()
+                        continue
+
+                # Check robots.txt and rate limits
+                if not self._can_fetch(url):
+                    self.logger.info(f"Skipping {url} (robots.txt disallowed)")
+                    self.url_queue.task_done()
                     continue
-                
-                # Process the page
-                self.content_hashes.add(content_hash)
-                self.visited_urls.add(url)
-                
-                # Extract and save content
-                title, text, links = self._process_html(html, url)
-                self._save_page(url, title, text, html)
-                
-                pages_crawled += 1
-                self.logger.info(f"Crawled ({pages_crawled}/{self.max_pages}): {url}")
-                
-                # Add new links to the queue
-                for link in links:
-                    if link not in self.visited_urls:
-                        url_queue.append((link, depth + 1))
-                
-            except Exception as e:
-                self.logger.error(f"Error crawling {url}: {str(e)}")
-                self.failure_count += 1
-        
-        self.logger.info(f"Crawl completed. Pages crawled: {pages_crawled}, Failures: {self.failure_count}")
-        return pages_crawled
-    
+
+                self._respect_rate_limits(url)
+
+                # Fetch and process page
+                try:
+                    html, status_code = self._fetch_url(url)
+                    if status_code != 200 or not html:
+                        self.logger.warning(f"Failed to fetch {url} (status: {status_code})")
+                        self.url_queue.task_done()
+                        continue
+
+                    # Check for duplicate content
+                    content_hash = hashlib.md5(html.encode()).hexdigest()
+                    with self.content_lock:
+                        if content_hash in self.content_hashes:
+                            self.url_queue.task_done()
+                            continue
+                        self.content_hashes.add(content_hash)
+
+                    # Process HTML and extract links
+                    title, text, links = self._process_html(html, url)
+                    self._save_page(url, title, text, html)
+
+                    # Update visited URLs and crawl count
+                    with self.visited_lock:
+                        self.visited_urls.add(url)
+
+                    with self.crawl_lock:
+                        self.pages_crawled += 1
+
+                    self.logger.info(f"Crawled ({self.pages_crawled}/{self.max_pages}): {url}")
+
+                    # Add new links to queue
+                    for link in links:
+                        with self.visited_lock:
+                            if link not in self.visited_urls:
+                                self.url_queue.put((link, depth + 1))
+
+                except Exception as e:
+                    self.logger.error(f"Error crawling {url}: {str(e)}")
+
+                self.url_queue.task_done()
+
+            except queue.Empty:
+                continue
+
     def _fetch_url(self, url):
         """
         Fetch the content of a URL.
@@ -154,7 +182,7 @@ class Crawler:
         
         response = requests.get(url, headers=headers, timeout=10)
         return response.text, response.status_code
-    
+
     def _process_html(self, html, base_url):
         """
         Process HTML to extract title, text, and links.
@@ -194,7 +222,7 @@ class Crawler:
                 links.append(normalized_link)
         
         return title, text, links
-    
+
     def _normalize_url(self, url):
         """
         Normalize a URL by removing fragments and some query parameters.
@@ -237,7 +265,7 @@ class Crawler:
         except Exception as e:
             self.logger.warning(f"Error normalizing URL {url}: {str(e)}")
             return ""
-    
+
     def _respect_rate_limits(self, url):
         """
         Ensure we respect rate limits for a domain.
@@ -247,19 +275,20 @@ class Crawler:
         """
         domain = urllib.parse.urlparse(url).netloc
         
-        # Check if we need to wait
-        if domain in self.domain_last_access:
-            last_access = self.domain_last_access[domain]
-            time_since_last = time.time() - last_access
+        with self.domain_lock:
+            # Check if we need to wait
+            if domain in self.domain_last_access:
+                last_access = self.domain_last_access[domain]
+                time_since_last = time.time() - last_access
+                
+                if time_since_last < self.delay:
+                    wait_time = self.delay - time_since_last
+                    self.logger.debug(f"Rate limiting: waiting {wait_time:.2f}s for {domain}")
+                    time.sleep(wait_time)
             
-            if time_since_last < self.delay:
-                wait_time = self.delay - time_since_last
-                self.logger.debug(f"Rate limiting: waiting {wait_time:.2f}s for {domain}")
-                time.sleep(wait_time)
-        
-        # Update last access time
-        self.domain_last_access[domain] = time.time()
-    
+            # Update last access time
+            self.domain_last_access[domain] = time.time()
+
     def _can_fetch(self, url):
         """
         Check if we're allowed to fetch a URL according to robots.txt.
@@ -274,26 +303,27 @@ class Crawler:
             parsed_url = urllib.parse.urlparse(url)
             domain = parsed_url.netloc
             
-            # Check cache first
-            if domain not in self.robots_cache:
-                robots_url = f"{parsed_url.scheme}://{domain}/robots.txt"
-                rp = RobotFileParser()
-                rp.set_url(robots_url)
-                
-                try:
-                    rp.read()
-                    self.robots_cache[domain] = rp
-                except Exception as e:
-                    self.logger.warning(f"Error fetching robots.txt for {domain}: {str(e)}")
-                    # Assume allowed if we can't fetch robots.txt
-                    return True
+            with self.robots_lock:
+                # Check cache first
+                if domain not in self.robots_cache:
+                    robots_url = f"{parsed_url.scheme}://{domain}/robots.txt"
+                    rp = RobotFileParser()
+                    rp.set_url(robots_url)
+                    
+                    try:
+                        rp.read()
+                        self.robots_cache[domain] = rp
+                    except Exception as e:
+                        self.logger.warning(f"Error fetching robots.txt for {domain}: {str(e)}")
+                        # Assume allowed if we can't fetch robots.txt
+                        return True
             
             # Check if we can fetch
             return self.robots_cache[domain].can_fetch(self.user_agent, url)
         except Exception as e:
             self.logger.warning(f"Error checking robots.txt for {url}: {str(e)}")
             return True  # Default to allowed on error
-    
+
     def _save_page(self, url, title, text, html):
         """
         Save a crawled page to disk.
