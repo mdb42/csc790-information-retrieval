@@ -32,10 +32,12 @@ class InvertedIndex:
         reverse_doc_id_map (dict): Inverse mapping from document IDs to filenames.
         stopwords (set): Set of stopwords excluded from indexing.
         stemmer (PorterStemmer): Stemmer instance for term normalization.
+        special_chars (set): Set of special characters to remove
     """
 
     def __init__(self, documents_dir=None, index_file=None, use_existing_index=False,
-                 use_parallel=True, stopwords=None):
+                 use_parallel=True, stopwords=None, special_chars=None
+                 ):
         """
         Initialize the InvertedIndex. Loads existing index or builds new from documents.
 
@@ -50,6 +52,7 @@ class InvertedIndex:
         self.doc_id_map = {}           # {filename: doc_id}
         self.reverse_doc_id_map = {}   # {doc_id: filename}
         self.stopwords = stopwords or set()
+        self.special_chars = special_chars or set()
         self.stemmer = nltk.stem.PorterStemmer()
 
         if use_existing_index and index_file and os.path.exists(index_file):
@@ -91,32 +94,49 @@ class InvertedIndex:
 
     def add_document(self, doc_id, text):
         """
-        Process and add a document to the index.
-
+        Process and add a document to the index following the exact workflow:
+        1. Read documents
+        2. Tokenize
+        3. Lower case
+        4. Remove punctuation
+        5. Remove stopwords
+        6. Stemming
+        7. Create index
+        
         Args:
             doc_id (int): Unique identifier for the document.
             text (str): Raw text content of the document.
         """
-        # Tokenize into words and process each token
+        
+        # Tokenize
         tokens = nltk.word_tokenize(text)
         processed_tokens = []
-        for word in tokens:
-            # Normalize to lowercase and check if alphabetic
-            word_lower = word.lower()
-            if not word.isalpha():
-                continue  # Discard tokens with non-alphabetic characters
-            if word_lower in self.stopwords:
-                continue  # Skip stopwords
-            # Stem the token to normalize word variations
-            stemmed_word = self.stemmer.stem(word_lower)
-            processed_tokens.append(stemmed_word)
-
-        # Calculate term frequencies for the document
-        term_counts = Counter(processed_tokens)
         
-        # Update the inverted index with term counts
+        for word in tokens:
+            # Lower case
+            word_lower = word.lower()
+            
+            # Remove punctuation (apply special characters removal)
+            word_cleaned = word_lower
+            if self.special_chars:
+                for char in self.special_chars:
+                    word_cleaned = word_cleaned.replace(char, '')
+            
+            # Skip empty tokens after punctuation removal
+            if not word_cleaned:
+                continue
+            
+            # Remove stopwords
+            if word_cleaned in self.stopwords:
+                continue
+            
+            # Stemming
+            stemmed_word = self.stemmer.stem(word_cleaned)
+            processed_tokens.append(stemmed_word)
+        
+        term_counts = Counter(processed_tokens)
         for term, count in term_counts.items():
-            self.index[term][doc_id] = count  # {term: {doc_id: tf}}
+            self.index[term][doc_id] = count
 
     def save(self, filepath):
         """

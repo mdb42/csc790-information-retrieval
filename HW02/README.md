@@ -57,6 +57,7 @@ python query_parser.py --documents_dir my_docs --stopwords_file my_stops.txt --i
 Available options:
 - `--documents_dir`: Specify where your documents are located
 - `--stopwords_file`: Specify your stopwords file location
+- `--special_chars_file`: Specify your special characters file location
 - `--index_file`: Choose where to save/load the index
 - `--use_existing`: Use an existing index file instead of building a new one
 - `--no_parallel`: Disable parallel processing

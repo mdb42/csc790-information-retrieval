@@ -13,6 +13,10 @@ AND/OR operators, the retrieval implementation is otherwise only slightly modifi
 query_parser.py file that I offered for demonstration in Homework 1.
 Additionally, just as an exercise for my own understanding, I have implemented tf-idf scoring for
 term weighting and cosine similarity for ranking the retrieved documents.
+
+Note: I actually only just now saw that you are providing a list of special characters, and so the
+usage of that file is something I just added in the last ten minutes before submission. I hope that
+doesn't break anything!
 """
 
 import io
@@ -53,6 +57,28 @@ def initialize_nltk():
         nltk.data.find('tokenizers/punkt/english.pickle')
     except LookupError:
         nltk.download('punkt')
+
+def load_special_chars(special_chars_file):
+    """
+    Load special characters to be removed from text.
+    
+    Args:
+        special_chars_file (str): Path to the file containing special characters to remove.
+        
+    Returns:
+        set: A set of special characters to remove during processing.
+    """
+    logging.info(f"Loading special characters from '{special_chars_file}'...")
+    special_chars = set()
+    try:
+        with open(special_chars_file, encoding="utf-8") as file:
+            special_chars = {line.strip() for line in file if line.strip()}
+        logging.info(f"Loaded {len(special_chars)} special characters to remove.")
+    except FileNotFoundError:
+        logging.error(f"Special characters file not found: {special_chars_file}")
+    except Exception as e:
+        logging.error(f"Error loading special characters: {str(e)}")
+    return special_chars
 
 #################################################################
 # Query Parser
@@ -193,7 +219,7 @@ def generate_operator_combinations(terms):
         combinations.append(' '.join(query_parts))
     return combinations
 
-def process_queries(index, queries_file, results_file, verbose=False):
+def process_queries(index, queries_file, results_file, verbose=False, special_chars=None):
     """
     Process query file and write ranked results.
     
@@ -229,7 +255,7 @@ def process_queries(index, queries_file, results_file, verbose=False):
             output.write(f"\n================== User Query {query_num}: {query} ==================\n")
             
             # Process query terms once (for ranking)
-            processed_terms = process_query_terms(query, index.stopwords, index.stemmer)
+            processed_terms = process_query_terms(query, index.stopwords, index.stemmer, special_chars)
             
             for combo in combinations:
                 # Get matching documents using Boolean retrieval
@@ -271,7 +297,7 @@ def process_queries(index, queries_file, results_file, verbose=False):
             results.write(output.getvalue())
         logging.info(f"Query results written to '{results_file}'.")
 
-def process_query_terms(query, stopwords, stemmer):
+def process_query_terms(query, stopwords, stemmer, special_chars=None):
     """
     Processes query terms by tokenizing, normalizing, and stemming them.
     
@@ -279,10 +305,16 @@ def process_query_terms(query, stopwords, stemmer):
         query (str): The query string to process.
         stopwords (set): A set of stopwords to ignore.
         stemmer (nltk.stem.SnowballStemmer): A stemmer to use for term normalization.
+        special_chars (set): A set of special characters to remove.
     
     Returns:
         list: A list of processed query terms.
     """
+    # Remove special characters from query if specified
+    if special_chars:
+        for char in special_chars:
+            query = query.replace(char, ' ')
+    
     tokens = nltk.word_tokenize(query)
     processed_terms = []
     for word in tokens:
@@ -394,7 +426,8 @@ def calculate_document_rankings(index, query_terms, use_cosine=True):
 # Main Function - Build/Load and Query an Inverted Index
 #################################################################
 
-def main(documents_dir=None, stopwords_file=None,
+
+def main(documents_dir=None, stopwords_file=None, special_chars_file=None,
          index_file=None, use_existing_index=False, use_parallel=True, 
          query_file=None, results_file=None, verbose=False):
     """
@@ -410,7 +443,7 @@ def main(documents_dir=None, stopwords_file=None,
         results_file (str): File to save query results.
         verbose (bool): Enable verbose output with scores.
     """
-    if documents_dir is None or stopwords_file is None or index_file is None or query_file is None or results_file is None or verbose is None:
+    if documents_dir is None or stopwords_file is None or index_file is None or query_file is None or results_file is None or verbose is None or special_chars_file is None:
         parser = argparse.ArgumentParser(
             description='Build and query an inverted index from text documents.')
         parser.add_argument('--documents_dir', default='documents',
@@ -429,6 +462,8 @@ def main(documents_dir=None, stopwords_file=None,
                           help='File to save query results')
         parser.add_argument('--verbose', '-v', action='store_true',
                    help='Enable verbose output with scores')
+        parser.add_argument('--special_chars_file', default='special-chars.txt',
+                        help='File containing special characters to retain')
         
         args = parser.parse_args()
         documents_dir = args.documents_dir
@@ -438,15 +473,16 @@ def main(documents_dir=None, stopwords_file=None,
         use_parallel = not args.no_parallel
         query_file = args.query_file
         results_file = args.results_file
+        special_chars = load_special_chars(special_chars_file) if special_chars_file else set()
 
     initialize_nltk()
     display_banner()
     stopwords = InvertedIndex.load_stopwords(stopwords_file)
     index = InvertedIndex(documents_dir=documents_dir, index_file=index_file,
                           use_existing_index=use_existing_index, use_parallel=use_parallel,
-                          stopwords=stopwords)
+                          stopwords=stopwords, special_chars=special_chars)
     input("Press Enter to continue...") # Since the results may likely overflow your console
-    process_queries(index, query_file, results_file, verbose=args.verbose)
+    process_queries(index, query_file, results_file, verbose=args.verbose, special_chars=special_chars)
 
 if __name__ == "__main__":
     main()
