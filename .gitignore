@@ -13,3 +13,6 @@ HW04/
 config.json
 queries.txt
 results.txt
+engine/data/
+engine/logs/
+

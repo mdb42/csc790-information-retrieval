@@ -436,6 +436,7 @@ def main(documents_dir=None, stopwords_file=None, special_chars_file=None,
     Args:
         documents_dir (str): Directory containing documents to index.
         stopwords_file (str): File containing stopwords.
+        special_chars_file (str): File containing special characters to retain.
         index_file (str): Path to save/load the index.
         use_existing_index (bool): Use existing index if available.
         use_parallel (bool): Enable parallel processing.
@@ -462,7 +463,7 @@ def main(documents_dir=None, stopwords_file=None, special_chars_file=None,
                           help='File to save query results')
         parser.add_argument('--verbose', '-v', action='store_true',
                    help='Enable verbose output with scores')
-        parser.add_argument('--special_chars_file', default='special-chars.txt',
+        parser.add_argument('--special_chars_file', default='special_chars.txt',
                         help='File containing special characters to retain')
         
         args = parser.parse_args()
@@ -473,6 +474,7 @@ def main(documents_dir=None, stopwords_file=None, special_chars_file=None,
         use_parallel = not args.no_parallel
         query_file = args.query_file
         results_file = args.results_file
+        special_chars_file = args.special_chars_file
         special_chars = load_special_chars(special_chars_file) if special_chars_file else set()
 
     initialize_nltk()
