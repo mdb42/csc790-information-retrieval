@@ -16,4 +16,5 @@ queries.txt
 results.txt
 engine/data/
 engine/logs/
+kaggle.json
 
