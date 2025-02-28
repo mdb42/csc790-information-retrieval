@@ -9,8 +9,7 @@ import time
 
 from .crawler import Crawler
 from .constants import DATA_DIR, CRAWL_DIR, LOG_DIR
-from .data_loader import DataLoader
-
+    
 class SearchEngine:
     """
     Main class that coordinates the search engine components.
@@ -51,29 +50,6 @@ class SearchEngine:
         # Initialize crawler (but don't start it yet)
         self.crawler = None
         self.logger.info("Search engine initialized")
-    
-    def initialize_datasets(self):
-        """
-        Initialize and download required datasets.
-        """
-        self.logger.info("Initializing datasets...")
-        
-        # Create data loader
-        self.data_loader = DataLoader()
-        
-        # List available datasets
-        available_datasets = self.data_loader.list_available_datasets()
-        for dataset in available_datasets:
-            self.logger.info(f"Dataset: {dataset['name']} - {'Downloaded' if dataset['downloaded'] else 'Not downloaded'}")
-        
-        # Ensure required datasets are available
-        goodreads_path = self.data_loader.ensure_dataset("goodreads_reviews")
-        if goodreads_path:
-            self.logger.info(f"Goodreads dataset ready at {goodreads_path}")
-        else:
-            self.logger.warning("Goodreads dataset not available")
-        
-        return goodreads_path is not None
 
     def crawl(self, seed_urls=None, max_pages=100, max_depth=3, delay=1.0):
         """
@@ -135,7 +111,6 @@ class SearchEngine:
             'robots_checked': len(self.crawler.robots_cache),
             'crawl_failures': self.crawler.failure_count
         }
-
 
 def main():
     """

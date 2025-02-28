@@ -10,6 +10,7 @@ index.json
 setup_requirements.bat
 HW03/
 HW04/
+data/
 config.json
 queries.txt
 results.txt

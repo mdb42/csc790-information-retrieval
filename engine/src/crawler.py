@@ -13,6 +13,9 @@ from urllib.robotparser import RobotFileParser
 import queue
 import threading
 import hashlib
+import html2text
+
+
 
 class Crawler:
     """
@@ -142,6 +145,7 @@ class Crawler:
                     # Process HTML and extract links
                     title, text, links = self._process_html(html, url)
                     self._save_page(url, title, text, html)
+                    self._save_html_as_markdown(url, title, html)
 
                     # Update visited URLs and crawl count
                     with self.visited_lock:
@@ -362,4 +366,32 @@ class Crawler:
             return True
         except Exception as e:
             self.logger.error(f"Error saving page {url}: {str(e)}")
+            return False
+        
+    def _save_html_as_markdown(self, url, title, html):
+        """
+        Uses html2text to convert html to text and save it to a file.
+
+        Args:
+            url (str): URL of the page
+            title (str): Title of the page
+            text (str): Extracted text content
+            html (str): Raw HTML content
+        """
+        try:
+            # Create a filename based on the URL
+            url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
+
+            # Save text content
+            text_path = os.path.join(self.output_dir, f"{url_hash}.md")
+            with open(text_path, 'w', encoding='utf-8') as f:
+                f.write(f"URL: {url}\n")
+                f.write(f"TITLE: {title}\n")
+                f.write(f"CRAWL_TIME: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("\n" + "="*80 + "\n\n")
+                f.write(html2text.html2text(html))
+
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving page as text {url}: {str(e)}")
             return False

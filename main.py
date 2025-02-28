@@ -1,13 +1,7 @@
 from engine.src.core import SearchEngine
 
-def main():
-    config = {
-        'seed_urls': ['https://example.com', 'https://anothersite.org'],
-        'max_pages': 100,
-        'num_threads': 8
-    }
-    
-    engine = SearchEngine(config)
+def main():    
+    engine = SearchEngine()
     engine.crawl()
     print("Crawling complete!")
 
