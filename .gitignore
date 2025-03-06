@@ -8,7 +8,6 @@ documents/
 index.pkl
 index.json
 setup_requirements.bat
-HW03/
 HW04/
 data/
 config.json
@@ -17,4 +16,6 @@ results.txt
 engine/data/
 engine/logs/
 kaggle.json
+submissions/
+notes/
 
