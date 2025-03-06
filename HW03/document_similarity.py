@@ -1,18 +1,15 @@
 """
-Rebuilding from the ground up for speed! With only the essentials, I'm clocking in just over two minutes, 
-but I still need to make some critical changes. I'll fix the incorrect document ID assignment by manually 
-tracking valid document IDs and only incrementing for successfully processed documents. I'm going to use 
-regex for special character removal and token checks, replacing the slow nested loops. I'll get the 
-biggest boost in performance after I precompute document vectors and their magnitudes during indexing. 
-I'll optimize memory usage by employing sparse representations for document vectors instead of nested 
-Counter objects like I've been doing up until now. I'm really just committing to the repo at the moment 
-so I have some historical baseline established to analyze the performance gains from precomputed values.
+Well, that worked out nicely! 14.6539 seconds!
+I'm going to try numpy arrays for the vectors and see if that speeds things up.
+It will probably slow things down at first until I work out parallelization for it.
+I already know scipy.sparse and scikit-learn can do this faster, but I'll maybe make
+it adaptively use whatever depending on hardware and environment.
 """
-
 import os
 import time
 import math
 import argparse
+import re
 from collections import Counter, defaultdict
 import heapq
 import nltk
@@ -54,7 +51,7 @@ class Timer:
 ####################################################
 # Vector Space Model implementation
 ####################################################
-class VectorSpaceModelMinimal:
+class VectorSpaceModel:
     def __init__(self, documents_dir=None, stopwords_file=None, special_chars_file=None):
         self.documents_dir = documents_dir
         self.stopwords_file = stopwords_file
@@ -82,6 +79,10 @@ class VectorSpaceModelMinimal:
         self.doc_count = 0
         self.most_frequent = []
         self.idf_values = {}  # {term: idf_value}
+        
+        # Precomputed weights and magnitudes (for various weighting schemes)
+        self.weights = {}
+        self.magnitudes = {}
         
         # Load documents
         if documents_dir:
@@ -115,26 +116,21 @@ class VectorSpaceModelMinimal:
     
     def _preprocess_text(self, text):
         """
-        Required pipeline:
-        1. Tokenize
-        2. Lowercase
-        3. Remove special characters
-        4. Remove stopwords
-        5. Apply stemming
+        Processing pipeline:
+          1. Tokenize & lowercase
+          2. Remove special characters using regex
+          3. Filter tokens to only alphabetic characters
+          4. Remove stopwords
+          5. Apply stemming
         """
         # Tokenize and lowercase
         tokens = word_tokenize(text.lower())
         
-        # Remove special characters
+        # Remove special characters in one pass using regex (if applicable)
         if self.special_chars:
-            clean_tokens = []
-            for token in tokens:
-                clean_token = token
-                for char in self.special_chars:
-                    clean_token = clean_token.replace(char, '')
-                if clean_token and clean_token.isalpha():
-                    clean_tokens.append(clean_token)
-            tokens = clean_tokens
+            pattern = re.compile(f'[{re.escape("".join(self.special_chars))}]')
+            tokens = [pattern.sub('', t) for t in tokens]
+            tokens = [t for t in tokens if t.isalpha()]
         else:
             tokens = [t for t in tokens if t.isalpha()]
         
@@ -151,8 +147,9 @@ class VectorSpaceModelMinimal:
             # Get all text files in the directory
             all_files = [f for f in os.listdir(self.documents_dir) if f.endswith('.txt')]
             
-            # Read each document
-            for doc_id, filename in enumerate(all_files):
+            # Manually track document IDs to avoid gaps for invalid documents
+            doc_id = 0
+            for filename in all_files:
                 filepath = os.path.join(self.documents_dir, filename)
                 try:
                     with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -180,6 +177,8 @@ class VectorSpaceModelMinimal:
                     # Store document length (total terms)
                     self.doc_lengths[doc_id] = sum(term_counts.values())
                     
+                    doc_id += 1  # Increment only for valid documents
+                    
                 except Exception as e:
                     logging.error(f"Error reading {filename}: {str(e)}")
             
@@ -193,82 +192,64 @@ class VectorSpaceModelMinimal:
             # Compute most frequent terms
             self._compute_most_frequent_terms()
             
+            # Precompute document vectors and their magnitudes
+            self._precompute_weights()
+            
             logging.info(f"Loaded {self.doc_count} documents with {self.vocab_size} unique terms")
     
     def _compute_idf_values(self):
         for term, doc_freqs in self.term_doc_freqs.items():
             # Number of documents containing the term
-            doc_count = len(doc_freqs)
+            df = len(doc_freqs)
             # IDF = log(N/df)
-            self.idf_values[term] = math.log10(self.doc_count / max(doc_count, 1))
+            self.idf_values[term] = math.log10(self.doc_count / max(df, 1))
     
     def _compute_most_frequent_terms(self):
         term_totals = Counter()
-        
-        # Sum term frequencies across all documents
         for term, doc_freqs in self.term_doc_freqs.items():
             term_totals[term] = sum(doc_freqs.values())
-        
-        # Get top 10 terms
         self.most_frequent = term_totals.most_common(10)
     
+    def _precompute_weights(self):
+        self.weights = {'tf': {}, 'tfidf': {}, 'sublinear': {}}
+        self.magnitudes = {'tf': {}, 'tfidf': {}, 'sublinear': {}}
+        
+        for doc_id, terms in self.doc_term_freqs.items():
+            tf_weights = {}
+            tfidf_weights = {}
+            sublinear_weights = {}
+            
+            for term, freq in terms.items():
+                tf_weights[term] = freq
+                idf = self.idf_values.get(term, 0)
+                tfidf_weights[term] = freq * idf
+                sublinear_weights[term] = (1 + math.log10(freq)) * idf if freq > 0 else 0
+            
+            self.weights['tf'][doc_id] = tf_weights
+            self.weights['tfidf'][doc_id] = tfidf_weights
+            self.weights['sublinear'][doc_id] = sublinear_weights
+            
+            self.magnitudes['tf'][doc_id] = math.sqrt(sum(w**2 for w in tf_weights.values()))
+            self.magnitudes['tfidf'][doc_id] = math.sqrt(sum(w**2 for w in tfidf_weights.values()))
+            self.magnitudes['sublinear'][doc_id] = math.sqrt(sum(w**2 for w in sublinear_weights.values()))
+    
     def _compute_vector_similarity(self, doc1_id, doc2_id, weighting='tf'):
-        
-        # Get term frequencies for both documents
-        terms1 = self.doc_term_freqs[doc1_id]
-        terms2 = self.doc_term_freqs[doc2_id]
-        
-        # Find common terms for dot product
-        common_terms = set(terms1.keys()) & set(terms2.keys())
+        weights1 = self.weights[weighting][doc1_id]
+        weights2 = self.weights[weighting][doc2_id]
+        common_terms = set(weights1.keys()) & set(weights2.keys())
         if not common_terms:
             return 0.0
-        
-        # Compute weights based on weighting scheme
-        doc1_weights = {}
-        doc2_weights = {}
-        
-        for term in set(terms1.keys()) | set(terms2.keys()):
-            tf1 = terms1.get(term, 0)
-            tf2 = terms2.get(term, 0)
-            
-            # Apply weighting scheme
-            if weighting == 'tf':
-                w1 = tf1
-                w2 = tf2
-            elif weighting == 'tfidf':
-                idf = self.idf_values.get(term, 0)
-                w1 = tf1 * idf
-                w2 = tf2 * idf
-            elif weighting == 'sublinear':
-                idf = self.idf_values.get(term, 0)
-                # sublinear scaling: 1 + log10(tf) if tf > 0, 0 otherwise
-                w1 = (1 + math.log10(tf1)) * idf if tf1 > 0 else 0
-                w2 = (1 + math.log10(tf2)) * idf if tf2 > 0 else 0
-            
-            if w1 != 0:
-                doc1_weights[term] = w1
-            if w2 != 0:
-                doc2_weights[term] = w2
-        
-        # Compute dot product
-        dot_product = sum(doc1_weights.get(term, 0) * doc2_weights.get(term, 0) for term in common_terms)
-        
-        # Compute magnitudes
-        magnitude1 = math.sqrt(sum(w*w for w in doc1_weights.values()))
-        magnitude2 = math.sqrt(sum(w*w for w in doc2_weights.values()))
-        
-        # Compute cosine similarity
-        if magnitude1 > 0 and magnitude2 > 0:
-            return dot_product / (magnitude1 * magnitude2)
-        else:
-            return 0.0
+        dot_product = sum(weights1[term] * weights2[term] for term in common_terms)
+        magnitude1 = self.magnitudes[weighting][doc1_id]
+        magnitude2 = self.magnitudes[weighting][doc2_id]
+        return dot_product / (magnitude1 * magnitude2) if magnitude1 * magnitude2 != 0 else 0.0
     
     def find_similar_documents(self, k=10, weighting='tf'):
         with Timer(f"Similarity calculation ({weighting})"):
 
             # Compute all pairwise similarities
             similarities = []
-            
+
             # Only compute upper triangle (avoid duplicates)
             for i in range(self.doc_count):
                 for j in range(i + 1, self.doc_count):
@@ -287,7 +268,6 @@ class VectorSpaceModelMinimal:
                     self.filenames[doc2_id],
                     similarity
                 ))
-            
             return formatted_pairs
     
     def display_info(self):
@@ -318,7 +298,7 @@ def main():
     args = parser.parse_args()
     
     # Initialize the model
-    vsm = VectorSpaceModelMinimal(
+    vsm = VectorSpaceModel(
         documents_dir=args.documents_dir,
         stopwords_file=args.stopwords_file,
         special_chars_file=args.special_chars_file
@@ -345,7 +325,6 @@ def main():
     tf_start = time.time()
     tf_similar = vsm.find_similar_documents(k=k, weighting='tf')
     tf_time = time.time() - tf_start
-    
     print(f"\n1. Using tf (computed in {tf_time:.4f} seconds):")
     for i, (doc1, doc2, sim) in enumerate(tf_similar, 1):
         print(f"    {i}. {doc1}, {doc2} with similarity of {sim:.4f}")
@@ -354,7 +333,6 @@ def main():
     tfidf_start = time.time()
     tfidf_similar = vsm.find_similar_documents(k=k, weighting='tfidf')
     tfidf_time = time.time() - tfidf_start
-    
     print(f"\n2. Using tfidf (computed in {tfidf_time:.4f} seconds):")
     for i, (doc1, doc2, sim) in enumerate(tfidf_similar, 1):
         print(f"    {i}. {doc1}, {doc2} with similarity of {sim:.4f}")
@@ -363,7 +341,6 @@ def main():
     sublinear_start = time.time()
     sublinear_similar = vsm.find_similar_documents(k=k, weighting='sublinear')
     sublinear_time = time.time() - sublinear_start
-    
     print(f"\n3. Using wfidf (computed in {sublinear_time:.4f} seconds):")
     for i, (doc1, doc2, sim) in enumerate(sublinear_similar, 1):
         print(f"    {i}. {doc1}, {doc2} with similarity of {sim:.4f}")
