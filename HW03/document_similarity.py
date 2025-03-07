@@ -1,39 +1,6 @@
 """
-I brought back index saving/loading functionality from HW02 and reorganized the timing and logging
-to handle the full process, which was surprisingly difficult to get right. I could adjust the
-most frequent terms to accept a parameter, and I see two... rather, three ways to go about 
-that... but I am planning a major refactor anyway, and I'll handle it then.
-
-I benchmarked a set of different implementations:
-
-| Implementation                           | Document Loading Time (s) | Computation Time (s) |
-| ---------------------------------------- | ------------------------- | -------------------- |
-| Naive Implementation                     | 2.1664                    | 140.8226             |
-| Baseline (using only NLTK, precomputing) | 2.0773                    | 14.9225              |
-| Baseline (Parallelized)                  | 7.2267                    | 13.2070              |
-| Numpy                                    | 2.0430                    | 22.4775              |
-| Numpy (Parallelized)                     | 7.1467                    | 15.5376              |
-| Scipy.sparse Matrices                    | 2.1377                    | 12.2184              |
-| Scipy.sparse Matrices (Parallelized)     | 2.4310                    | 12.4492              |
-| Scikit-learn                             | 2.0673                    | 6.6826               |
-| Scikit-learn (Parallelized)              | 5.3822                    | 21.4385              |
-
-The notion is to adapt the code to use the most efficient library available in the environment.
-I would just go for sklearn really, because there is no way I'm reaching those numbers, but
-that implementation is not very illustrative of the actual process, which is why I'll leave
-this baseline precomputing version in place and optionally slide over to sklearn. I'm super
-surprised that I'm actually beating the numpy implementation, but I'm sure that is more just
-because there is overhead in creating the numpy arrays and I am not fully leveraging the
-benefits thry offer. Practically all parallelized implementations are slower due to
-the overhead, but they might shine with a larger dataset. The scipy.sparse approach is one
-I investigated immediately after the naive implementation, as I just honed in on the sparse
-matrices right away after class. It was the most difficult to manage, but really only because
-it was first. I might be able to trim some time off of it yet and make it a worthy contender.
-
-My intention is to break out the old abc library, go abstract and spin up different vsm classes
-to handle the different libraries. It's been over a year since I've written base classes in 
-python! We'll see how that goes. I'll probably hold off on parallelized implementations until
-the end, flagging it optional depending on collection size.
+I'm taking care of the nmost frequent terms now, because the refactor to use
+an abstract VSM class is going to take forever and I will otherwise forget.
 """
 import os
 import time
@@ -79,7 +46,6 @@ class VectorSpaceModel:
         
         self.vocab_size = 0
         self.doc_count = 0
-        self.most_frequent = []
         self.idf_values = {}
         
         self.weights = {}
@@ -165,7 +131,6 @@ class VectorSpaceModel:
             self.doc_count = len(self.doc_term_freqs)
             self.vocab_size = len(self.term_doc_freqs)
             self._compute_idf_values()
-            self._compute_most_frequent_terms()
             self._precompute_weights()
             logging.info(f"Loaded {self.doc_count} documents with {self.vocab_size} unique terms")
     
@@ -174,11 +139,11 @@ class VectorSpaceModel:
             df = len(doc_freqs)
             self.idf_values[term] = math.log10(self.doc_count / max(df, 1))
     
-    def _compute_most_frequent_terms(self):
+    def get_most_frequent_terms(self, n=10):
         term_totals = Counter()
         for term, doc_freqs in self.term_doc_freqs.items():
             term_totals[term] = sum(doc_freqs.values())
-        self.most_frequent = term_totals.most_common(10)
+        return term_totals.most_common(n)
     
     def _precompute_weights(self):
         self.weights = {'tf': {}, 'tfidf': {}, 'sublinear': {}}
@@ -301,10 +266,10 @@ class VectorSpaceModel:
         print("Last Name : Branson")
         print("=============================================================")
 
-    def display_most_frequent_terms(self):        
+    def display_most_frequent_terms(self, n=10):
         print(f"The number of unique words is: {self.vocab_size:,}")
-        print("The top 10 most frequent words are:")
-        for i, (term, freq) in enumerate(self.most_frequent, 1):
+        print(f"The top {n} most frequent words are:")
+        for i, (term, freq) in enumerate(self.get_most_frequent_terms(n), 1):
             print(f"    {i}. {term} ({freq:,})")
         print("=============================================================")
     
