@@ -1,9 +1,39 @@
 """
-Well, that worked out nicely! 14.6539 seconds!
-I'm going to try numpy arrays for the vectors and see if that speeds things up.
-It will probably slow things down at first until I work out parallelization for it.
-I already know scipy.sparse and scikit-learn can do this faster, but I'll maybe make
-it adaptively use whatever depending on hardware and environment.
+I brought back index saving/loading functionality from HW02 and reorganized the timing and logging
+to handle the full process, which was surprisingly difficult to get right. I could adjust the
+most frequent terms to accept a parameter, and I see two... rather, three ways to go about 
+that... but I am planning a major refactor anyway, and I'll handle it then.
+
+I benchmarked a set of different implementations:
+
+| Implementation                           | Document Loading Time (s) | Computation Time (s) |
+| ---------------------------------------- | ------------------------- | -------------------- |
+| Naive Implementation                     | 2.1664                    | 140.8226             |
+| Baseline (using only NLTK, precomputing) | 2.0773                    | 14.9225              |
+| Baseline (Parallelized)                  | 7.2267                    | 13.2070              |
+| Numpy                                    | 2.0430                    | 22.4775              |
+| Numpy (Parallelized)                     | 7.1467                    | 15.5376              |
+| Scipy.sparse Matrices                    | 2.1377                    | 12.2184              |
+| Scipy.sparse Matrices (Parallelized)     | 2.4310                    | 12.4492              |
+| Scikit-learn                             | 2.0673                    | 6.6826               |
+| Scikit-learn (Parallelized)              | 5.3822                    | 21.4385              |
+
+The notion is to adapt the code to use the most efficient library available in the environment.
+I would just go for sklearn really, because there is no way I'm reaching those numbers, but
+that implementation is not very illustrative of the actual process, which is why I'll leave
+this baseline precomputing version in place and optionally slide over to sklearn. I'm super
+surprised that I'm actually beating the numpy implementation, but I'm sure that is more just
+because there is overhead in creating the numpy arrays and I am not fully leveraging the
+benefits thry offer. Practically all parallelized implementations are slower due to
+the overhead, but they might shine with a larger dataset. The scipy.sparse approach is one
+I investigated immediately after the naive implementation, as I just honed in on the sparse
+matrices right away after class. It was the most difficult to manage, but really only because
+it was first. I might be able to trim some time off of it yet and make it a worthy contender.
+
+My intention is to break out the old abc library, go abstract and spin up different vsm classes
+to handle the different libraries. It's been over a year since I've written base classes in 
+python! We'll see how that goes. I'll probably hold off on parallelized implementations until
+the end, flagging it optional depending on collection size.
 """
 import os
 import time
@@ -15,78 +45,60 @@ import heapq
 import nltk
 from nltk.stem import PorterStemmer
 from nltk.tokenize import word_tokenize
+import pickle
+from utils import Logger, Timer
 
-####################################################
-# Utility functions and classes
-####################################################
-class Logger:
-    def __init__(self, level="INFO"):
-        self.level = level
-        
-    def info(self, message):
-        if self.level in ["INFO", "DEBUG"]:
-            print(f"[INFO] {time.strftime('%Y-%m-%d %H:%M:%S')} - {message}")
-            
-    def error(self, message):
-        print(f"[ERROR] {time.strftime('%Y-%m-%d %H:%M:%S')} - {message}")
-
-# Initialize logger
 logging = Logger()
-
-class Timer:
-    """Simple context manager for timing code blocks"""
-    def __init__(self, name=None):
-        self.name = name
-        
-    def __enter__(self):
-        self.start = time.time()
-        return self
-        
-    def __exit__(self, *args):
-        self.end = time.time()
-        self.interval = self.end - self.start
-        if self.name:
-            logging.info(f"{self.name} took {self.interval:.4f} seconds")
 
 ####################################################
 # Vector Space Model implementation
 ####################################################
 class VectorSpaceModel:
-    def __init__(self, documents_dir=None, stopwords_file=None, special_chars_file=None):
+    def __init__(self, documents_dir=None, stopwords_file=None, special_chars_file=None,       
+                 index_file=None, use_existing_index=False):
         self.documents_dir = documents_dir
         self.stopwords_file = stopwords_file
         self.special_chars_file = special_chars_file
+        self.index_file = index_file
+        self.use_existing_index = use_existing_index
 
         try:
             nltk.data.find('tokenizers/punkt')
         except LookupError:
             nltk.download('punkt')
         
-        # Load pre-processing resources
         self.stopwords = self._load_stopwords()
         self.special_chars = self._load_special_chars()
         self.stemmer = PorterStemmer()
         
-        # Data structures
         self.documents = []
         self.filenames = []
-        self.term_doc_freqs = defaultdict(Counter)  # {term: {doc_id: freq}}
-        self.doc_term_freqs = defaultdict(Counter)  # {doc_id: {term: freq}}
-        self.doc_lengths = {}  # {doc_id: total_terms}
+        self.term_doc_freqs = defaultdict(Counter)
+        self.doc_term_freqs = defaultdict(Counter)
+        self.doc_lengths = {}
         
-        # Statistics
         self.vocab_size = 0
         self.doc_count = 0
         self.most_frequent = []
-        self.idf_values = {}  # {term: idf_value}
+        self.idf_values = {}
         
-        # Precomputed weights and magnitudes (for various weighting schemes)
         self.weights = {}
         self.magnitudes = {}
         
-        # Load documents
-        if documents_dir:
+        if use_existing_index and index_file and os.path.exists(index_file):
+            if self.load_index(index_file):
+                logging.info("Using existing index")
+            else:
+                logging.info("Failed to load existing index. Building new index...")
+                self._load_documents()
+                if index_file:
+                    self.save_index(index_file)
+        elif documents_dir:
             self._load_documents()
+            if index_file:
+                self.save_index(index_file)
+        else:
+            logging.error("Either documents_dir or a valid index_file with use_existing_index=True must be provided")
     
     def _load_stopwords(self):
         stopwords = set()
@@ -115,93 +127,51 @@ class VectorSpaceModel:
         return special_chars
     
     def _preprocess_text(self, text):
-        """
-        Processing pipeline:
-          1. Tokenize & lowercase
-          2. Remove special characters using regex
-          3. Filter tokens to only alphabetic characters
-          4. Remove stopwords
-          5. Apply stemming
-        """
-        # Tokenize and lowercase
         tokens = word_tokenize(text.lower())
-        
-        # Remove special characters in one pass using regex (if applicable)
         if self.special_chars:
             pattern = re.compile(f'[{re.escape("".join(self.special_chars))}]')
             tokens = [pattern.sub('', t) for t in tokens]
             tokens = [t for t in tokens if t.isalpha()]
         else:
             tokens = [t for t in tokens if t.isalpha()]
-        
-        # Remove stopwords
         tokens = [t for t in tokens if t not in self.stopwords]
-        
-        # Apply stemming
         tokens = [self.stemmer.stem(t) for t in tokens]
-        
         return tokens
     
     def _load_documents(self):
         with Timer("Document loading"):
-            # Get all text files in the directory
             all_files = [f for f in os.listdir(self.documents_dir) if f.endswith('.txt')]
-            
-            # Manually track document IDs to avoid gaps for invalid documents
             doc_id = 0
             for filename in all_files:
                 filepath = os.path.join(self.documents_dir, filename)
                 try:
                     with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                         text = f.read()
-                    
                     if not text.strip():
                         continue
-                    
-                    # Process document
                     tokens = self._preprocess_text(text)
                     if not tokens:
                         continue
-                    
-                    # Store document information
                     self.filenames.append(filename)
-                    
-                    # Count term frequencies
                     term_counts = Counter(tokens)
-                    
-                    # Update term-document and document-term indexes
                     for term, freq in term_counts.items():
                         self.term_doc_freqs[term][doc_id] = freq
                         self.doc_term_freqs[doc_id][term] = freq
-                    
-                    # Store document length (total terms)
                     self.doc_lengths[doc_id] = sum(term_counts.values())
-                    
-                    doc_id += 1  # Increment only for valid documents
-                    
+                    doc_id += 1
                 except Exception as e:
                     logging.error(f"Error reading {filename}: {str(e)}")
             
-            # Update statistics
             self.doc_count = len(self.doc_term_freqs)
             self.vocab_size = len(self.term_doc_freqs)
-            
-            # Compute IDF values
             self._compute_idf_values()
-            
-            # Compute most frequent terms
             self._compute_most_frequent_terms()
-            
-            # Precompute document vectors and their magnitudes
             self._precompute_weights()
-            
             logging.info(f"Loaded {self.doc_count} documents with {self.vocab_size} unique terms")
     
     def _compute_idf_values(self):
         for term, doc_freqs in self.term_doc_freqs.items():
-            # Number of documents containing the term
             df = len(doc_freqs)
-            # IDF = log(N/df)
             self.idf_values[term] = math.log10(self.doc_count / max(df, 1))
     
     def _compute_most_frequent_terms(self):
@@ -213,22 +183,18 @@ class VectorSpaceModel:
     def _precompute_weights(self):
         self.weights = {'tf': {}, 'tfidf': {}, 'sublinear': {}}
         self.magnitudes = {'tf': {}, 'tfidf': {}, 'sublinear': {}}
-        
         for doc_id, terms in self.doc_term_freqs.items():
             tf_weights = {}
             tfidf_weights = {}
             sublinear_weights = {}
-            
             for term, freq in terms.items():
                 tf_weights[term] = freq
                 idf = self.idf_values.get(term, 0)
                 tfidf_weights[term] = freq * idf
                 sublinear_weights[term] = (1 + math.log10(freq)) * idf if freq > 0 else 0
-            
             self.weights['tf'][doc_id] = tf_weights
             self.weights['tfidf'][doc_id] = tfidf_weights
             self.weights['sublinear'][doc_id] = sublinear_weights
-            
             self.magnitudes['tf'][doc_id] = math.sqrt(sum(w**2 for w in tf_weights.values()))
             self.magnitudes['tfidf'][doc_id] = math.sqrt(sum(w**2 for w in tfidf_weights.values()))
             self.magnitudes['sublinear'][doc_id] = math.sqrt(sum(w**2 for w in sublinear_weights.values()))
@@ -246,21 +212,13 @@ class VectorSpaceModel:
     
     def find_similar_documents(self, k=10, weighting='tf'):
         with Timer(f"Similarity calculation ({weighting})"):
-
-            # Compute all pairwise similarities
             similarities = []
-
-            # Only compute upper triangle (avoid duplicates)
             for i in range(self.doc_count):
                 for j in range(i + 1, self.doc_count):
                     sim = self._compute_vector_similarity(i, j, weighting)
-                    if sim > 0:  # Only store non-zero similarities
+                    if sim > 0:
                         similarities.append((i, j, sim))
-            
-            # Get top-k most similar pairs
             top_pairs = heapq.nlargest(k, similarities, key=lambda x: x[2])
-            
-            # Format results
             formatted_pairs = []
             for doc1_id, doc2_id, similarity in top_pairs:
                 formatted_pairs.append((
@@ -270,44 +228,137 @@ class VectorSpaceModel:
                 ))
             return formatted_pairs
     
+    def save_index(self, filepath):
+        try:
+            with Timer("Saving index"):
+                term_doc_dict = {term: dict(docs) for term, docs in self.term_doc_freqs.items()}
+                doc_term_dict = {doc_id: dict(terms) for doc_id, terms in self.doc_term_freqs.items()}
+                weights_dict = {}
+                for weight_type, doc_weights in self.weights.items():
+                    weights_dict[weight_type] = {doc_id: dict(weights) for doc_id, weights in doc_weights.items()}
+                index_data = {
+                    'filenames': self.filenames,
+                    'term_doc_freqs': term_doc_dict,
+                    'doc_term_freqs': doc_term_dict,
+                    'doc_lengths': self.doc_lengths,
+                    'vocab_size': self.vocab_size,
+                    'doc_count': self.doc_count,
+                    'idf_values': self.idf_values,
+                    'most_frequent': self.most_frequent,
+                    'weights': weights_dict,
+                    'magnitudes': self.magnitudes
+                }
+                logging.info(f"Attempting to save index to: {os.path.abspath(filepath)}")
+                directory = os.path.dirname(filepath)
+                if directory and not os.path.exists(directory):
+                    os.makedirs(directory)
+                with open(filepath, 'wb') as f:
+                    pickle.dump(index_data, f)
+                if os.path.exists(filepath):
+                    file_size = os.path.getsize(filepath) / (1024 * 1024)
+                    logging.info(f"Index saved to {filepath} ({file_size:.2f} MB)")
+                else:
+                    logging.error(f"Failed to create index file at {filepath}")
+        except Exception as e:
+            logging.error(f"Error saving index: {str(e)}")
+            import traceback
+            logging.error(traceback.format_exc())
+            
+    def load_index(self, filepath):
+        try:
+            with Timer("Loading index"):
+                with open(filepath, 'rb') as f:
+                    data = pickle.load(f)
+                self.filenames = data['filenames']
+                self.doc_count = data['doc_count']
+                self.vocab_size = data['vocab_size']
+                self.most_frequent = data['most_frequent']
+                self.idf_values = data['idf_values']
+                self.doc_lengths = data['doc_lengths']
+                self.term_doc_freqs = defaultdict(Counter)
+                for term, docs in data['term_doc_freqs'].items():
+                    self.term_doc_freqs[term] = Counter(docs)
+                self.doc_term_freqs = defaultdict(Counter)
+                for doc_id, terms in data['doc_term_freqs'].items():
+                    doc_id = int(doc_id) if isinstance(doc_id, str) else doc_id
+                    self.doc_term_freqs[doc_id] = Counter(terms)
+                self.weights = {}
+                for weight_type, doc_weights in data['weights'].items():
+                    self.weights[weight_type] = {}
+                    for doc_id, weights in doc_weights.items():
+                        doc_id = int(doc_id) if isinstance(doc_id, str) else doc_id
+                        self.weights[weight_type][doc_id] = weights
+                self.magnitudes = data['magnitudes']
+                logging.info(f"Successfully loaded index from {filepath}")
+                return True
+        except Exception as e:
+            logging.error(f"Error loading index: {str(e)}")
+            return False
+
     def display_info(self):
-        print("=================== CSC790-IR Homework 03 (Minimal Dependencies) ===================")
+        print("=================== CSC790-IR Homework 03 ===================")
         print("First Name: Matthew")
         print("Last Name : Branson")
         print("=============================================================")
+
+    def display_most_frequent_terms(self):        
         print(f"The number of unique words is: {self.vocab_size:,}")
         print("The top 10 most frequent words are:")
         for i, (term, freq) in enumerate(self.most_frequent, 1):
             print(f"    {i}. {term} ({freq:,})")
         print("=============================================================")
-
+    
 ####################################################
 # Main function
 ####################################################
 def main():
+    logging.info("========== Starting new run ==========")
+    initialization_start = time.time()
+
     parser = argparse.ArgumentParser(
-        description='Vector Space Model for document similarity (Minimal Dependencies implementation)'
-    )
+        description='Vector Space Model for document similarity.')
     parser.add_argument('--documents_dir', default='documents',
-                      help='Directory containing documents')
+                    help='Directory containing documents to index')
     parser.add_argument('--stopwords_file', default='stopwords.txt',
-                      help='File containing stopwords')
+                    help='File containing stopwords')
     parser.add_argument('--special_chars_file', default='special_chars.txt',
-                      help='File containing special characters to filter')
+                    help='File containing special characters to remove')
+    parser.add_argument('--index_file', default='index.pkl',
+                    help='Path to save/load the index')
+    parser.add_argument('--use_existing', action='store_true',
+                    help='Use existing index if available')
     
     args = parser.parse_args()
     
-    # Initialize the model
-    vsm = VectorSpaceModel(
-        documents_dir=args.documents_dir,
-        stopwords_file=args.stopwords_file,
-        special_chars_file=args.special_chars_file
-    )
+    vsm = None
+    if args.use_existing and os.path.exists(args.index_file):
+        logging.info(f"Loading existing index from {args.index_file}")
+        vsm = VectorSpaceModel(
+            stopwords_file=args.stopwords_file,
+            special_chars_file=args.special_chars_file
+        )
+        if not vsm.load_index(args.index_file):
+            logging.error("Failed to load index, building new one")
+            vsm = VectorSpaceModel(
+                documents_dir=args.documents_dir,
+                stopwords_file=args.stopwords_file,
+                special_chars_file=args.special_chars_file
+            )
+            vsm.save_index(args.index_file)
+    else:
+        vsm = VectorSpaceModel(
+            documents_dir=args.documents_dir,
+            stopwords_file=args.stopwords_file,
+            special_chars_file=args.special_chars_file
+        )
+        logging.info(f"Saving index to {args.index_file}")
+        vsm.save_index(args.index_file)
     
-    # Display information
+    initialization_time = time.time() - initialization_start
+
     vsm.display_info()
+    vsm.display_most_frequent_terms()
     
-    # Get k from user
     while True:
         try:
             k = int(input("\nEnter the number of top similar document pairs (k): "))
@@ -318,38 +369,32 @@ def main():
         except ValueError:
             print("Please enter a valid number.")
     
-    # Run similarity calculations with different weighting schemes
     print("\nThe top k closest documents are:")
     
-    # Term Frequency
-    tf_start = time.time()
-    tf_similar = vsm.find_similar_documents(k=k, weighting='tf')
-    tf_time = time.time() - tf_start
-    print(f"\n1. Using tf (computed in {tf_time:.4f} seconds):")
-    for i, (doc1, doc2, sim) in enumerate(tf_similar, 1):
-        print(f"    {i}. {doc1}, {doc2} with similarity of {sim:.4f}")
-    
-    # TF-IDF
-    tfidf_start = time.time()
-    tfidf_similar = vsm.find_similar_documents(k=k, weighting='tfidf')
-    tfidf_time = time.time() - tfidf_start
-    print(f"\n2. Using tfidf (computed in {tfidf_time:.4f} seconds):")
-    for i, (doc1, doc2, sim) in enumerate(tfidf_similar, 1):
-        print(f"    {i}. {doc1}, {doc2} with similarity of {sim:.4f}")
-    
-    # Sublinear TF-IDF
-    sublinear_start = time.time()
-    sublinear_similar = vsm.find_similar_documents(k=k, weighting='sublinear')
-    sublinear_time = time.time() - sublinear_start
-    print(f"\n3. Using wfidf (computed in {sublinear_time:.4f} seconds):")
-    for i, (doc1, doc2, sim) in enumerate(sublinear_similar, 1):
-        print(f"    {i}. {doc1}, {doc2} with similarity of {sim:.4f}")
-    
-    # Overall timing
-    print("\n=============================================================")
-    print(f"Total similarity computation time: {tf_time + tfidf_time + sublinear_time:.4f} seconds")
-    print("=============================================================")
+    similarity_start = time.time()
 
+    tf_similar = vsm.find_similar_documents(k=k, weighting='tf')
+    print(f"\n1. Using tf:")
+    for i, (doc1, doc2, sim) in enumerate(tf_similar, 1):
+        print(f"    {doc1}, {doc2} with similarity of {sim:.2f}")
+    
+    tfidf_similar = vsm.find_similar_documents(k=k, weighting='tfidf')
+    print(f"\n2. Using tfidf:")
+    for i, (doc1, doc2, sim) in enumerate(tfidf_similar, 1):
+        print(f"    {doc1}, {doc2} with similarity of {sim:.2f}")
+    
+    sublinear_similar = vsm.find_similar_documents(k=k, weighting='sublinear')
+    print(f"\n3. Using wfidf:")
+    for i, (doc1, doc2, sim) in enumerate(sublinear_similar, 1):
+        print(f"    {doc1}, {doc2} with similarity of {sim:.2f}")
+
+    similarity_time = time.time() - similarity_start
+
+    total_time = initialization_time + similarity_time
+    logging.info(f"Total processing time: {total_time:.4f} seconds (Initialization: {initialization_time:.4f}s, Similarity calculations: {similarity_time:.4f}s)")
+    print("\n=============================================================")
+    print("Total processing time: {:.4f} seconds".format(total_time))
+    print("=============================================================")
 
 if __name__ == "__main__":
     main()

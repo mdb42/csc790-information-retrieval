@@ -4,12 +4,11 @@
 Author: Matthew Branson
 Date: 6 March 2025
 
-Total similarity computation time: 140.5059 seconds
 
 ### Requirements
 
-Python 3.13.1
-NLTK 3.9.1
+- Python 3.13.1
+- NLTK 3.9.1
 
 ### Setup
 
@@ -32,11 +31,9 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Prepare your text documents in a directory. By default, the program looks for a 'documents' folder in the same directory as the script.
+3. Prepare your text documents in a directory. By default, the program looks for a `documents` folder in the same directory as the script.
 
-4. Ensure you have a stopwords file. By default, the program looks for 'stopwords.txt' in the same directory.
-
-5. Create a file with your queries. By default, the program looks for 'queries.txt' with one query per line.
+4. Ensure you have a stopwords file (`stopwords.txt`) in the same directory. Optionally, provide a special characters file (`special_chars.txt`) to remove unwanted characters from your documents.
 
 ### Running the Program
 
@@ -46,17 +43,19 @@ The simplest way to run the program is:
 python document_similarity.py
 ```
 
-This will use all default settings.
+This will use all default settings. After starting, the program will prompt you to enter the number of top similar document pairs (k).
 
 ### Command Line Options
 
-You can customize the behavior using command line arguments:
+You can customize the behavior using command line arguments. For example:
 
 ```bash
-python document_similarity.py --documents_dir my_docs --stopwords_file my_stops.txt --special_chars_file my_special_chars.txt
+python document_similarity.py --documents_dir my_docs --stopwords_file my_stops.txt --special_chars_file my_special_chars.txt --index_file my_index.pkl --use_existing
 ```
 
 Available options:
-- `--documents_dir`: Specify where your documents are located
-- `--stopwords_file`: Specify your stopwords file location
-- `--special_chars_file`: Specify your special characters file location
+- `--documents_dir`: Specify the directory containing your documents (default: `documents`)
+- `--stopwords_file`: Specify the path to your stopwords file (default: `stopwords.txt`)
+- `--special_chars_file`: Specify the path to your special characters file (default: `special_chars.txt`)
+- `--index_file`: Specify the path to save or load the index (default: `index.pkl`)
+- `--use_existing`: Use an existing index if available, instead of rebuilding it
