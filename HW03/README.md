@@ -1,5 +1,5 @@
 # CSC790 Information Retrieval
-## Assignment: Homework 03 - Document Similarity
+## Assignment: Homework 03 - Vector Space Model
 
 Author: Matthew Branson
 Date: 6 March 2025
@@ -40,7 +40,7 @@ pip install -r requirements.txt
 The simplest way to run the program is:
 
 ```bash
-python document_similarity.py
+python main.py
 ```
 
 This will use all default settings. After starting, the program will prompt you to enter the number of top similar document pairs (k).
@@ -50,7 +50,7 @@ This will use all default settings. After starting, the program will prompt you 
 You can customize the behavior using command line arguments. For example:
 
 ```bash
-python document_similarity.py --documents_dir my_docs --stopwords_file my_stops.txt --special_chars_file my_special_chars.txt --index_file my_index.pkl --use_existing
+python main.py --documents_dir my_docs --stopwords_file my_stops.txt --special_chars_file my_special_chars.txt --index_file my_index.pkl --use_existing
 ```
 
 Available options:
