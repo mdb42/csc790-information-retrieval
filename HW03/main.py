@@ -1,10 +1,11 @@
+# main.py
 import argparse
-import time
 from src.text_processor import TextProcessor
 from src.vector_space_model import VectorSpaceModel
+from src.performance_monitoring import Profiler
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description='Vector Space Model for document similarity.')
+    parser = argparse.ArgumentParser(description='Vector space model for document similarity.')
     parser.add_argument('--documents_dir', default='documents', 
                         help='Directory containing documents to index')
     parser.add_argument('--stopwords_file', default='stopwords.txt', 
@@ -62,8 +63,10 @@ def find_and_display_similar_documents(vsm, k):
                 print(f"    {doc1}, {doc2} with similarity of {sim:.2f}")
 
 def main():
-    start_time = time.time()
     args = parse_arguments()
+
+    profiler = Profiler()
+    profiler.start_global_timer()
 
     text_processor = TextProcessor(
         documents_dir=args.documents_dir,
@@ -75,16 +78,23 @@ def main():
     vsm = VectorSpaceModel(
         text_processor, 
         index_file=args.index_file, 
-        use_existing_index=args.use_existing
+        use_existing_index=args.use_existing,
+        profiler=profiler
     )
 
     display_banner()
     display_vocabulary_statistics(vsm)
     k = get_valid_int_input("\nEnter the number of top similar document pairs (k): ")
     find_and_display_similar_documents(vsm, k)
-    total_time = time.time() - start_time
+
+    total_time = profiler.get_global_time()
+    profiler.write_log_file(
+        filename="performance.log",
+        doc_count=vsm.doc_count,
+        vocab_size=vsm.vocab_size,
+        total_time=total_time
+    )
     print(f"\nTotal execution time: {total_time:.4f} seconds")
-    vsm.write_log_to_file(timing_data={"total_time": total_time})
 
 if __name__ == "__main__":
     main()

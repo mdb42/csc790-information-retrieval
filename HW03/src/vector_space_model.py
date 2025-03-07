@@ -1,24 +1,11 @@
-import time
+# src/vector_space_model.py
 import math
 import pickle
 import os
 import heapq
-import io
-
-class Timer:
-    def __init__(self, task_name):
-        self.task_name = task_name
-
-    def __enter__(self):
-        self.start = time.time()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        elapsed = time.time() - self.start
-        return elapsed
 
 class VectorSpaceModel:
-    def __init__(self, parser, index_file=None, use_existing_index=False):
+    def __init__(self, parser, index_file=None, use_existing_index=False, profiler=None):
         self.parser = parser
         self.index_file = index_file
         self.use_existing_index = use_existing_index
@@ -26,7 +13,10 @@ class VectorSpaceModel:
         self.term_doc_freqs = {}
         self.doc_term_freqs = {}
         self.idf_values = {}
-        self.log_buffer = io.StringIO()
+        if profiler is None:
+            from src.performance_monitoring import Profiler
+            profiler = Profiler()
+        self.profiler = profiler
 
         if use_existing_index and index_file and os.path.exists(index_file):
             self.load_index(index_file)
@@ -35,11 +25,8 @@ class VectorSpaceModel:
             if index_file:
                 self.save_index(index_file)
 
-    def _log(self, message):
-        self.log_buffer.write(f"{message}\n")
-
     def _build_index(self):
-        with Timer("Document Parsing"):
+        with self.profiler.timer("Document Parsing"):
             self.filenames, term_freqs = self.parser.process_documents()
 
         self.doc_count = len(self.filenames)
@@ -56,7 +43,7 @@ class VectorSpaceModel:
         self.vocab_size = len(self.term_doc_freqs)
         self._compute_idf_values()
         self._precompute_weights()
-        self._log(f"Indexed {self.doc_count} documents with {self.vocab_size} unique terms.")
+        self.profiler.log(f"Indexed {self.doc_count} documents with {self.vocab_size} unique terms.")
 
     def _compute_idf_values(self):
         self.idf_values = {
@@ -102,7 +89,7 @@ class VectorSpaceModel:
         return dot_product / (magnitude1 * magnitude2) if magnitude1 * magnitude2 != 0 else 0.0
 
     def find_similar_documents(self, k=10, weighting='tf'):
-        with Timer(f"Similarity calculation ({weighting})"):
+        with self.profiler.timer(f"Similarity calculation ({weighting})"):
             similarities = []
 
             for i in range(self.doc_count):
@@ -112,29 +99,15 @@ class VectorSpaceModel:
                         similarities.append((i, j, sim))
 
             top_pairs = heapq.nlargest(k, similarities, key=lambda x: x[2])
-            self._log(f"Computed top-{k} similar documents using {weighting} weighting.")
+            self.profiler.log(f"Computed top-{k} similar documents using {weighting} weighting.")
             return [(self.filenames[doc1_id], self.filenames[doc2_id], similarity) for doc1_id, doc2_id, similarity in top_pairs]
-
-    def write_log_to_file(self, filename="performance.log", timing_data=None):
-        with open(filename, "w") as log_file:
-            log_file.write("===== Performance Log =====\n")
-            log_file.write(f"Total Documents Indexed: {self.doc_count}\n")
-            log_file.write(f"Vocabulary Size: {self.vocab_size}\n")
-            log_file.write("\n=== Timing Data ===\n")
-            
-            if timing_data:
-                for phase, duration in timing_data.items():
-                    log_file.write(f"{phase}: {duration:.4f} seconds\n")
-
-            log_file.write("\n=== Log Messages ===\n")
-            log_file.write(self.log_buffer.getvalue())
 
     def get_most_frequent_terms(self, n=10):
         term_totals = {term: sum(freqs.values()) for term, freqs in self.term_doc_freqs.items()}
         return sorted(term_totals.items(), key=lambda x: x[1], reverse=True)[:n]
 
     def save_index(self, filepath):
-        with Timer("Saving Index"):
+        with self.profiler.timer("Saving Index"):
             with open(filepath, 'wb') as f:
                 pickle.dump({
                     'filenames': self.filenames,
@@ -144,7 +117,7 @@ class VectorSpaceModel:
                 }, f)
 
     def load_index(self, filepath):
-        with Timer("Loading Index"):
+        with self.profiler.timer("Loading Index"):
             with open(filepath, 'rb') as f:
                 data = pickle.load(f)
                 self.filenames = data['filenames']
