@@ -1,12 +1,12 @@
 # src/performance_monitoring.py
 import time
-import io
+from io import StringIO
 
 class Profiler:
     def __init__(self):
         self.timings = {}
-        self.log_buffer = io.StringIO()
         self.start_time = None
+        self.paused_time = 0.0
 
     def timer(self, task_name):
         """Returns a context manager to time a code block."""
@@ -20,24 +20,40 @@ class Profiler:
         """Starts the global execution timer."""
         self.start_time = time.time()
 
-    def get_global_time(self):
-        """Returns the total execution time since start_global_timer was called."""
-        return time.time() - self.start_time if self.start_time else 0.0
+    def pause_global_timer(self):
+        if self.start_time is not None:
+            self.paused_time += time.time() - self.start_time
+            self.start_time = None
 
-    def write_log_file(self, filename, doc_count, vocab_size, total_time):
-        """Writes all collected data to a log file."""
+    def resume_global_timer(self):
+        if self.start_time is None:
+            self.start_time = time.time() - self.paused_time
+            self.paused_time = 0.0
+
+    def get_global_time(self):
+        if self.start_time is None:
+            return self.paused_time
+        return time.time() - self.start_time + self.paused_time
+    
+    def generate_report(self, doc_count: int, vocab_size: int) -> str:
+        """Returns formatted performance report as string"""
+        report = StringIO()
+        
+        report.write("=== Timing Breakdown ===\n")
+        for task, duration in self.timings.items():
+            report.write(f"{task}: {duration:.4f}s\n")
+        
+        tracked_total = sum(self.timings.values())
+        report.write(f"\nTracked Operations Total: {tracked_total:.4f}s\n")
+        
+        return report.getvalue()
+
+    def write_log_file(self, filename: str, doc_count: int, vocab_size: int):
+        """Writes report to file and returns it for display"""
+        report = self.generate_report(doc_count, vocab_size)
         with open(filename, "w") as f:
-            f.write("===== Performance Log =====\n")
-            f.write(f"Total Documents Indexed: {doc_count}\n")
-            f.write(f"Vocabulary Size: {vocab_size}\n")
-            
-            f.write("\n=== Timing Data ===\n")
-            for task, duration in self.timings.items():
-                f.write(f"{task}: {duration:.4f} seconds\n")
-            f.write(f"Total Execution: {total_time:.4f} seconds\n")
-            
-            f.write("\n=== Log Messages ===\n")
-            f.write(self.log_buffer.getvalue())
+            f.write(report)
+        return report
 
 class Timer:
     def __init__(self, task_name, profiler):

@@ -1,8 +1,10 @@
 # main.py
+import os
 import argparse
-from src.text_processor import TextProcessor
-from src.vector_space_model import VectorSpaceModel
 from src.performance_monitoring import Profiler
+from src.text_processor import TextProcessor
+from src.index.memory_index import MemoryIndex
+from src.vsm.standard_vsm import StandardVSM
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Vector space model for document similarity.')
@@ -27,10 +29,10 @@ def display_banner():
     print("Last Name : Branson")
     print("=" * 61)
 
-def display_vocabulary_statistics(vsm):
-    print(f"\nThe number of unique words is: {vsm.vocab_size}")
+def display_vocabulary_statistics(index: MemoryIndex):
+    print(f"\nThe number of unique words is: {index.vocab_size}")
     print("The top 10 most frequent words are:")
-    for i, (term, freq) in enumerate(vsm.get_most_frequent_terms(n=10), 1):
+    for i, (term, freq) in enumerate(index.get_most_frequent_terms(n=10), 1):
         print(f"    {i}. {term} ({freq:,})")
     print("=" * 61)
 
@@ -64,37 +66,52 @@ def find_and_display_similar_documents(vsm, k):
 
 def main():
     args = parse_arguments()
-
     profiler = Profiler()
     profiler.start_global_timer()
 
-    text_processor = TextProcessor(
-        documents_dir=args.documents_dir,
-        stopwords_file=args.stopwords_file,
-        special_chars_file=args.special_chars_file,
-        parallel=args.parallel
-    )
+    if args.use_existing and os.path.exists(args.index_file):
+        # Load existing index
+        with profiler.timer("Index Loading"):
+            index = MemoryIndex.load(args.index_file)
+    else:
+        # Process documents and build new index
+        text_processor = TextProcessor(args.documents_dir, args.stopwords_file, args.special_chars_file, args.parallel)
+        with profiler.timer("Document Processing"):
+            filenames, term_freqs = text_processor.process_documents()
+        
+        index = MemoryIndex()
+        with profiler.timer("Index Building"):
+            for filename, freq_dict in zip(filenames, term_freqs):
+                index.add_document(freq_dict, filename)
+        
+        index.save(args.index_file)
     
-    vsm = VectorSpaceModel(
-        text_processor, 
-        index_file=args.index_file, 
-        use_existing_index=args.use_existing,
-        profiler=profiler
-    )
+    # Vector Space Model
+    vsm = StandardVSM(index, profiler)
+    vsm.build_model()
 
+    profiler.pause_global_timer()
+
+    # Display Information
     display_banner()
-    display_vocabulary_statistics(vsm)
+    display_vocabulary_statistics(index)
+
+    # Get user input
     k = get_valid_int_input("\nEnter the number of top similar document pairs (k): ")
+
+    profiler.resume_global_timer()
+
+    # Find similar documents
     find_and_display_similar_documents(vsm, k)
 
-    total_time = profiler.get_global_time()
-    profiler.write_log_file(
+    # Final reporting
+    log_report = profiler.write_log_file(
         filename="performance.log",
-        doc_count=vsm.doc_count,
-        vocab_size=vsm.vocab_size,
-        total_time=total_time
+        doc_count=index.doc_count,
+        vocab_size=index.vocab_size
     )
-    print(f"\nTotal execution time: {total_time:.4f} seconds")
+
+    print("\n"+log_report)
 
 if __name__ == "__main__":
     main()
