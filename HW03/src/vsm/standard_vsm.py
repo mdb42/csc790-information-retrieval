@@ -1,10 +1,25 @@
 # src/vsm/standard_vsm.py
+"""
+Scenario:
+- standard library only
+- no parallelization
+
+=== Timing Breakdown ===
+Document Processing: 1.9402s
+Index Building: 0.0101s
+Weight Precomputation: 0.0560s
+Similarity Calculation (tf): 4.7971s
+Similarity Calculation (tfidf): 4.8770s
+Similarity Calculation (sublinear): 4.9141s
+
+Tracked Operations Total: 16.5945s
+"""
 import math
 import heapq
 from typing import List, Tuple
 from src.performance_monitoring import Profiler
 from src.index.memory_index import MemoryIndex
-from src.vsm.base_vsm import BaseVSM
+from src.vsm.base import BaseVSM
 
 class StandardVSM(BaseVSM):
     def __init__(self, index: MemoryIndex, profiler: Profiler = None):

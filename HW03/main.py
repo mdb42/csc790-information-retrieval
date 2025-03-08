@@ -18,8 +18,8 @@ def parse_arguments():
     parser.add_argument('--use_existing', action='store_true', 
                         help='Use existing index if available')
     parser.add_argument('--parallel', action='store_true', 
-                        help='Enable parallel processing')
-    parser.add_argument('--vsm_mode', choices=['auto', 'standard', 'parallel', 'sparse'], default='auto',
+                        help='Enable parallel processing') # Might be deprecating this option - not that it ever worked, mind you
+    parser.add_argument('--vsm_mode', choices=['auto', 'standard', 'parallel', 'hybrid', 'sparse'], default='auto',
                         help='VSM implementation to use')
     return parser.parse_args()
 

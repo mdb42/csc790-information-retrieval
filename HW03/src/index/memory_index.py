@@ -2,7 +2,7 @@
 import pickle
 from collections import defaultdict
 from threading import Lock
-from src.index.base_index import BaseIndex
+from src.index.base import BaseIndex
 
 class MemoryIndex(BaseIndex):
     def __init__(self):
@@ -18,7 +18,7 @@ class MemoryIndex(BaseIndex):
 
     def add_document(self, term_freqs: dict, filename: str = None) -> int:
         with self._lock:
-            doc_id = self._doc_count  # Auto-incrementing ID
+            doc_id = self._doc_count
             self.doc_term_freqs[doc_id] = term_freqs
             if filename:
                 self.filenames.append(filename)
@@ -61,5 +61,5 @@ class MemoryIndex(BaseIndex):
             index.term_doc_freqs = defaultdict(dict, data['term_doc_freqs'])
             index.doc_term_freqs = defaultdict(dict, data['doc_term_freqs'])
             index.filenames = data['filenames']
-            index._doc_count = len(index.doc_term_freqs)  # Fix: Assign to _doc_count
+            index._doc_count = len(index.doc_term_freqs)
         return index

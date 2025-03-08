@@ -1,9 +1,26 @@
 # src/vsm/sparse_vsm.py
+"""
+Scenario:
+ - numpy, scipy, and sklearn available (presumably true with anaconda)
+ - you saved all your linear algebra class notes just for this moment
+
+=== Timing Breakdown ===
+Document Processing: 1.9819s
+Index Building: 0.0102s
+Optimized Sparse Matrix Construction: 0.0305s
+Optimized Weight Precomputation: 0.0021s
+Matrix Normalization + Similarity: 0.0396s
+Similarity Calculation (tf): 0.0557s
+Similarity Calculation (tfidf): 0.0498s
+Similarity Calculation (sublinear): 0.0505s
+
+Tracked Operations Total: 2.2202s
+ """
 import numpy as np
 from scipy.sparse import csr_matrix
 from sklearn.metrics.pairwise import cosine_similarity
 from typing import List, Tuple
-from src.vsm.base_vsm import BaseVSM
+from src.vsm.base import BaseVSM
 from src.performance_monitoring import Profiler
 from src.index.memory_index import MemoryIndex
 
@@ -50,7 +67,6 @@ class SparseVSM(BaseVSM):
 
     def _optimized_cosine_similarity(self, matrix):
         with self.profiler.timer("Matrix Normalization + Similarity"):
-            # sklearn's cosine_similarity handles normalization internally
             return cosine_similarity(matrix, dense_output=False)
 
     def find_similar_documents(self, k=10, weighting='tf') -> List[Tuple[str, str, float]]:
