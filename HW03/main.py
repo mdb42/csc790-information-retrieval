@@ -4,7 +4,6 @@ import argparse
 from src.performance_monitoring import Profiler
 from src.text_processor import TextProcessor
 from src.index.memory_index import MemoryIndex
-from src.vsm.standard_vsm import StandardVSM
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Vector space model for document similarity.')
@@ -20,6 +19,8 @@ def parse_arguments():
                         help='Use existing index if available')
     parser.add_argument('--parallel', action='store_true', 
                         help='Enable parallel processing')
+    parser.add_argument('--vsm_mode', choices=['auto', 'standard', 'parallel', 'sparse'], default='auto',
+                        help='VSM implementation to use')
     return parser.parse_args()
 
 def display_banner():
@@ -85,10 +86,9 @@ def main():
                 index.add_document(freq_dict, filename)
         
         index.save(args.index_file)
-    
-    # Vector Space Model
-    vsm = StandardVSM(index, profiler)
-    vsm.build_model()
+
+    from src.vsm.factory import VSMFactory
+    vsm = VSMFactory.create_vsm(index, args.vsm_mode, profiler)
 
     profiler.pause_global_timer()
 
