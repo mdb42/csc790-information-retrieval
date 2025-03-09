@@ -3,21 +3,11 @@
 Scenario:
 - standard library only
 - parallelization only where it measurably benefits performance (similarities)
-
-=== Timing Breakdown ===
-Document Processing: 1.9541s
-Index Building: 0.0102s
-Weight Precomputation (Serial): 0.0569s
-Parallel Similarity Calculation (tf): 4.3041s
-Parallel Similarity Calculation (tfidf): 4.3012s
-Parallel Similarity Calculation (sublinear): 4.4514s
-
-Tracked Operations Total: 15.0779s
 """
 import math
 import heapq
 import multiprocessing
-from src.vsm.base import BaseVSM
+from src.vsm import BaseVSM
 
 def _compute_similarities_for_doc(args):
     i, weight_vectors, magnitudes, total_docs = args

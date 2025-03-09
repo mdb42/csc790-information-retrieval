@@ -2,22 +2,12 @@
 """
 Scenario:
 - standard library only
-- parallelization where possible
-
-=== Timing Breakdown ===
-Document Processing: 1.9740s
-Index Building: 0.0102s
-Parallel Weight Precomputation: 3.5328s
-Parallel Similarity Calculation (tf): 4.2469s
-Parallel Similarity Calculation (tfidf): 4.2716s
-Parallel Similarity Calculation (sublinear): 4.3384s
-
-Tracked Operations Total: 18.3739s
+- parallelization wherever possible
 """
 import math
 import heapq
 import multiprocessing
-from src.vsm.base import BaseVSM
+from src.vsm import BaseVSM
 
 def _compute_doc_weights(args):
     doc_id, term_counts, idf_values = args

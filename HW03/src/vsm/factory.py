@@ -3,7 +3,7 @@ import os
 from typing import Optional
 from src.index.memory_index import MemoryIndex
 from src.performance_monitoring import Profiler
-from src.vsm.base import BaseVSM
+from src.vsm import BaseVSM
 
 class VSMFactory:
     @staticmethod
@@ -32,17 +32,17 @@ class VSMFactory:
             from src.vsm.sparse_vsm import SparseVSM
             vsm = SparseVSM(index, profiler)
         elif mode == 'parallel':
-            from HW03.src.vsm.parallel_vsm import ParallelVSM
+            from src.vsm import ParallelVSM
             vsm = ParallelVSM(index, profiler)
         elif mode == 'hybrid':
-            from HW03.src.vsm.hybrid_vsm import HybridVSM
+            from src.vsm import HybridVSM
             vsm = HybridVSM(index, profiler)
         elif mode == 'standard':
-            from src.vsm.standard_vsm import StandardVSM
+            from src.vsm import StandardVSM
             vsm = StandardVSM(index, profiler)
         else:
             # Fallback to standard
-            from src.vsm.standard_vsm import StandardVSM
+            from src.vsm import StandardVSM
             vsm = StandardVSM(index, profiler)
             profiler.log(f"Requested mode '{mode}' not available, using standard implementation.")
         

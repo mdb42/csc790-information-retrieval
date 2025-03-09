@@ -1,7 +1,7 @@
 # src/vsm/base_vsm.py
 from typing import List, Tuple
 from src.performance_monitoring import Profiler
-from src.index.memory_index import MemoryIndex
+from src.index import MemoryIndex
 
 class BaseVSM:
     def __init__(self, index: MemoryIndex, profiler: Profiler = None):

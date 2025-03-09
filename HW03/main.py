@@ -2,8 +2,8 @@
 import os
 import argparse
 from src.performance_monitoring import Profiler
-from src.text_processor import TextProcessor
-from src.index.memory_index import MemoryIndex
+from src.text_processor import TextProcessorFactory
+from src.index import MemoryIndex
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Vector space model for document similarity.')
@@ -17,8 +17,8 @@ def parse_arguments():
                         help='Path to save/load the index')
     parser.add_argument('--use_existing', action='store_true', 
                         help='Use existing index if available')
-    parser.add_argument('--parallel', action='store_true', 
-                        help='Enable parallel processing') # Might be deprecating this option - not that it ever worked, mind you
+    parser.add_argument('--tp_mode', choices=['auto', 'standard', 'parallel'], default='auto',
+                        help='Text processor implementation to use')
     parser.add_argument('--vsm_mode', choices=['auto', 'standard', 'parallel', 'hybrid', 'sparse'], default='auto',
                         help='VSM implementation to use')
     return parser.parse_args()
@@ -47,7 +47,7 @@ def get_valid_int_input(prompt):
         except ValueError:
             print("Invalid input. Please enter a valid number.")
 
-def find_and_display_similar_documents(vsm, k):
+def display_similar_documents(vsm, k):
     print("\nThe top k closest documents are:")
     weighting_schemes = [
         ("1. Using tf", "tf"),
@@ -71,22 +71,25 @@ def main():
     profiler.start_global_timer()
 
     if args.use_existing and os.path.exists(args.index_file):
-        # Load existing index
         with profiler.timer("Index Loading"):
             index = MemoryIndex.load(args.index_file)
     else:
-        # Process documents and build new index
-        text_processor = TextProcessor(args.documents_dir, args.stopwords_file, args.special_chars_file, args.parallel)
-        with profiler.timer("Document Processing"):
-            filenames, term_freqs = text_processor.process_documents()
-        
+        text_processor = TextProcessorFactory.create_processor(
+            documents_dir=args.documents_dir,
+            stopwords_file=args.stopwords_file,
+            special_chars_file=args.special_chars_file,
+            profiler=profiler,
+            mode=args.tp_mode
+        )
+
+        filenames, term_freqs = text_processor.process_documents()
+
         index = MemoryIndex()
         with profiler.timer("Index Building"):
             for filename, freq_dict in zip(filenames, term_freqs):
                 index.add_document(freq_dict, filename)
         
         index.save(args.index_file)
-
     from src.vsm.factory import VSMFactory
     vsm = VSMFactory.create_vsm(index, args.vsm_mode, profiler)
 
@@ -102,7 +105,7 @@ def main():
     profiler.resume_global_timer()
 
     # Find similar documents
-    find_and_display_similar_documents(vsm, k)
+    display_similar_documents(vsm, k)
 
     # Final reporting
     log_report = profiler.write_log_file(

@@ -1,26 +1,27 @@
-# src/text_processor.py
+# src/text_processor/standard_processor.py
 import os
 import re
-import nltk
 from collections import Counter
-from multiprocessing import Pool
-from nltk.stem import PorterStemmer
-from nltk.tokenize import word_tokenize
+from src.text_processor import BaseTextProcessor
 
-class TextProcessor:
-    def __init__(self, documents_dir, stopwords_file=None, special_chars_file=None, parallel=False):
-        self.documents_dir = documents_dir
-        self.parallel = parallel
+class StandardTextProcessor(BaseTextProcessor):
+    def __init__(self, documents_dir, stopwords_file=None, special_chars_file=None, profiler=None):
+        super().__init__(documents_dir, stopwords_file, special_chars_file, profiler)
         self.stopwords = self._load_stopwords(stopwords_file)
         self.special_chars = self._load_special_chars(special_chars_file)
-        self.stemmer = PorterStemmer()
-        self.documents = []
         self.filenames = []
-
+        
+        import nltk
+        from nltk.stem import PorterStemmer
+        from nltk.tokenize import word_tokenize
+        
+        self.word_tokenize = word_tokenize
+        self.stemmer = PorterStemmer()
+                    
         try:
             nltk.data.find('tokenizers/punkt')
         except LookupError:
-            nltk.download('punkt')
+            nltk.download('punkt', quiet=True)
 
     def _load_stopwords(self, filepath):
         if not filepath:
@@ -43,7 +44,7 @@ class TextProcessor:
             return set()
 
     def _preprocess_text(self, text):
-        tokens = word_tokenize(text.lower())
+        tokens = self.word_tokenize(text.lower())
 
         if self.special_chars:
             pattern = re.compile(f'[{re.escape("".join(self.special_chars))}]')
@@ -72,15 +73,23 @@ class TextProcessor:
             return None
 
     def process_documents(self):
-        filepaths = [os.path.join(self.documents_dir, f) for f in os.listdir(self.documents_dir) if f.endswith('.txt')]
+        timer_label = "Sequential Document Processing"
+        
+        filepaths = [os.path.join(self.documents_dir, f) 
+                    for f in os.listdir(self.documents_dir) 
+                    if f.endswith('.txt')]
 
-        if self.parallel:
-            with Pool() as pool:
-                results = pool.map(self._process_single_file, filepaths)
+        if self.profiler:
+            with self.profiler.timer(timer_label):
+                results = [self._process_single_file(fp) for fp in filepaths]
         else:
             results = [self._process_single_file(fp) for fp in filepaths]
-
-        results = [r for r in results if r]  # Remove None values
-        self.filenames, term_freqs = zip(*results) if results else ([], [])
-
+            
+        results = [r for r in results if r]
+        
+        if results:
+            self.filenames, term_freqs = zip(*results)
+        else:
+            self.filenames, term_freqs = [], []
+            
         return self.filenames, term_freqs
