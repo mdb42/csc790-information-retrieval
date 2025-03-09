@@ -1,51 +1,93 @@
 # src/vsm/factory.py
 import os
 from typing import Optional
-from src.index.memory_index import MemoryIndex
+from src.index.base import BaseIndex
 from src.performance_monitoring import Profiler
-from src.vsm import BaseVSM
 
 class VSMFactory:
-    @staticmethod
-    def create_vsm(index: MemoryIndex, mode: str = 'auto', profiler: Optional[Profiler] = None) -> BaseVSM:
-        if profiler is None:
-            from src.performance_monitoring import Profiler
-            profiler = Profiler()
 
-        has_scipy = False
+    DEFAULT_HYBRID_DOC_THRESHOLD = 15000
+    
+    @staticmethod
+    def check_dependencies():
+        dependencies = {
+            "numpy": False,
+            "scipy.sparse": False,
+            "sklearn.metrics": False,
+            "multiprocessing": False
+        }
+        
         try:
-            import scipy.sparse
-            import sklearn.metrics.pairwise
-            has_scipy = True
+            import numpy
+            dependencies["numpy"] = True
         except ImportError:
             pass
         
+        try:
+            import scipy.sparse
+            dependencies["scipy.sparse"] = True
+        except ImportError:
+            pass
+        
+        try:
+            import sklearn.metrics.pairwise
+            dependencies["sklearn.metrics"] = True
+        except ImportError:
+            pass
+        
+        try:
+            import multiprocessing
+            try:
+                with multiprocessing.Pool(1) as p:
+                    pass
+                dependencies["multiprocessing"] = True
+            except:
+                pass
+        except ImportError:
+            pass
+        
+        return dependencies
+    
+    @staticmethod
+    def create_vsm(index: BaseIndex, mode: str = 'auto', profiler: Optional[Profiler] = None,
+                  hybrid_threshold: int = None):
+        if profiler is None:
+            from src.performance_monitoring import Profiler
+            profiler = Profiler()
+        
+        if hybrid_threshold is None:
+            hybrid_threshold = VSMFactory.DEFAULT_HYBRID_DOC_THRESHOLD
+        
+        deps = VSMFactory.check_dependencies()
+        
+        has_sparse_deps = deps["numpy"] and deps["scipy.sparse"] and deps["sklearn.metrics"]
+        
+        has_parallel = deps["multiprocessing"]
+        
+        doc_count = index.doc_count
+        
         if mode == 'auto':
-            if has_scipy and index.doc_count > 100:
+            if has_sparse_deps:
                 mode = 'sparse'
-            elif index.doc_count > 1000:
-                mode = 'parallel'
+            elif has_parallel:
+                if doc_count <= hybrid_threshold:
+                    mode = 'hybrid'
+                else:
+                    mode = 'parallel'
             else:
                 mode = 'standard'
         
-        if mode == 'sparse' and has_scipy:
+        if mode == 'sparse' and has_sparse_deps:
             from src.vsm.sparse_vsm import SparseVSM
-            vsm = SparseVSM(index, profiler)
-        elif mode == 'parallel':
-            from src.vsm import ParallelVSM
-            vsm = ParallelVSM(index, profiler)
-        elif mode == 'hybrid':
-            from src.vsm import HybridVSM
-            vsm = HybridVSM(index, profiler)
-        elif mode == 'standard':
-            from src.vsm import StandardVSM
-            vsm = StandardVSM(index, profiler)
+            return SparseVSM(index, profiler)
+        elif mode == 'parallel' and has_parallel:
+            from src.vsm.parallel_vsm import ParallelVSM
+            return ParallelVSM(index, profiler)
+        elif mode == 'hybrid' and has_parallel:
+            from src.vsm.hybrid_vsm import HybridVSM
+            return HybridVSM(index, profiler)
         else:
-            # Fallback to standard
-            from src.vsm import StandardVSM
-            vsm = StandardVSM(index, profiler)
-            profiler.log(f"Requested mode '{mode}' not available, using standard implementation.")
-        
-        # Build the model
-        vsm.build_model()
-        return vsm
+            if mode != 'standard' and mode != 'auto':
+                print(f"Warning: {mode} VSM requested but dependencies not available. Using standard VSM.")
+            from src.vsm.standard_vsm import StandardVSM
+            return StandardVSM(index, profiler)

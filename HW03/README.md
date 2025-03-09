@@ -2,15 +2,26 @@
 ## Assignment: Homework 03 - Vector Space Model
 
 Author: Matthew Branson
-Date: 6 March 2025
+Date: 9 March 2025
 
+### Overview
+
+This project implements a configurable and highly optimized Vector Space Model (VSM) for document similarity analysis.
 
 ### Requirements
 
-- Python 3.13.1
+### Core Requirements
+- Python 3.9+ (Developed and tested with Python 3.13.1)
 - NLTK 3.9.1
+- Basic text files to process
 
-### Setup
+### Optional Dependencies (for enhanced performance)
+- NumPy (for vector operations)
+- SciPy (for sparse matrix operations)
+- scikit-learn (for optimized distance calculations)
+- Multiprocessing support (for parallel processing)
+
+## Installation
 
 1. Create and activate a virtual environment to isolate the project dependencies:
 
@@ -28,14 +39,26 @@ venv\Scripts\activate
 2. Install the required dependencies using pip:
 
 ```bash
-pip install -r requirements.txt
+# Install core dependencies
+pip install nltk
+
+# Install optional dependencies for optimal performance
+pip install numpy scipy scikit-learn
+# Anaconda users may expect to already have these dependencies
 ```
 
-3. Prepare your text documents in a directory. By default, the program looks for a `documents` folder in the same directory as the script.
+3. Download required NLTK data:
 
-4. Ensure you have a stopwords file (`stopwords.txt`) in the same directory. Optionally, provide a special characters file (`special_chars.txt`) to remove unwanted characters from your documents.
+```bash
+python -c "import nltk; nltk.download('punkt')"
+# This will otherwise be done automatically on first run
+```
 
-### Running the Program
+4. Prepare your text documents in a directory. By default, the program looks for a `documents` folder in the same directory as the script.
+
+5. Ensure you have a stopwords file (`stopwords.txt`) in the same directory. Optionally, provide a special characters file (`special_chars.txt`) to remove unwanted characters from your documents.
+
+## Running the Program
 
 The simplest way to run the program is:
 
@@ -43,19 +66,29 @@ The simplest way to run the program is:
 python main.py
 ```
 
-This will use all default settings. After starting, the program will prompt you to enter the number of top similar document pairs (k).
+After processing the documents and building the index, the program will prompt you to enter the number of top similar document pairs (k) to find.
 
 ### Command Line Options
 
-You can customize the behavior using command line arguments. For example:
-
+#### Basic Options
 ```bash
-python main.py --documents_dir my_docs --stopwords_file my_stops.txt --special_chars_file my_special_chars.txt --index_file my_index.pkl --use_existing
+python main.py --documents_dir my_docs --stopwords_file my_stops.txt --use_existing
 ```
 
-Available options:
-- `--documents_dir`: Specify the directory containing your documents (default: `documents`)
-- `--stopwords_file`: Specify the path to your stopwords file (default: `stopwords.txt`)
-- `--special_chars_file`: Specify the path to your special characters file (default: `special_chars.txt`)
-- `--index_file`: Specify the path to save or load the index (default: `index.pkl`)
-- `--use_existing`: Use an existing index if available, instead of rebuilding it
+#### Path and File Options
+- `--documents_dir PATH`: Directory containing documents to index (default: "documents")
+- `--stopwords_file PATH`: File containing stopwords to remove (default: "stopwords.txt")
+- `--special_chars_file PATH`: File containing special characters to remove (default: "special_chars.txt")
+- `--index_file PATH`: Path to save/load the index file (default: "index.pkl")
+- `--use_existing`: Use existing index if available, instead of rebuilding
+- `--export_json PATH`: Export index to a JSON file for human-readable inspection
+
+#### Implementation Selection
+- `--index_mode MODE`: Index implementation to use (choices: "auto", "standard", "parallel", default: "auto")
+- `--vsm_mode MODE`: VSM implementation to use (choices: "auto", "standard", "parallel", "hybrid", "sparse", default: "auto")
+
+#### Advanced Options
+- `--parallel_index_threshold N`: Document threshold for parallel index (default: 5000)
+- `--hybrid_vsm_threshold N`: Document threshold for hybrid vs parallel VSM (default: 15000)
+- `--stats`: Display detailed index statistics
+- `--check_deps`: Check and display available dependencies

@@ -10,10 +10,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 from typing import List, Tuple
 from src.vsm import BaseVSM
 from src.performance_monitoring import Profiler
-from src.index import MemoryIndex
+from src.index import BaseIndex
 
 class SparseVSM(BaseVSM):
-    def __init__(self, index: MemoryIndex, profiler: Profiler = None):
+    def __init__(self, index: BaseIndex, profiler: Profiler = None):
         super().__init__(index, profiler)
         self._build_optimized_sparse_matrix()
         self._precompute_optimized_weights()

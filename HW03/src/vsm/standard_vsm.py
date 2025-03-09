@@ -8,11 +8,11 @@ import math
 import heapq
 from typing import List, Tuple
 from src.performance_monitoring import Profiler
-from src.index import MemoryIndex
+from src.index import BaseIndex
 from src.vsm import BaseVSM
 
 class StandardVSM(BaseVSM):
-    def __init__(self, index: MemoryIndex, profiler: Profiler = None):
+    def __init__(self, index: BaseIndex, profiler: Profiler = None):
         super().__init__(index, profiler)
         self.idf_values = {}
         self._compute_idf_values()

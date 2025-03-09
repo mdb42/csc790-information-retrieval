@@ -2,8 +2,8 @@
 import os
 import argparse
 from src.performance_monitoring import Profiler
-from src.text_processor import TextProcessorFactory
-from src.index import MemoryIndex
+from src.index.factory import IndexFactory
+from src.vsm.factory import VSMFactory
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Vector space model for document similarity.')
@@ -17,11 +17,43 @@ def parse_arguments():
                         help='Path to save/load the index')
     parser.add_argument('--use_existing', action='store_true', 
                         help='Use existing index if available')
-    parser.add_argument('--tp_mode', choices=['auto', 'standard', 'parallel'], default='auto',
-                        help='Text processor implementation to use')
+    parser.add_argument('--index_mode', choices=['auto', 'standard', 'parallel'], default='auto',
+                        help='Index implementation to use')
     parser.add_argument('--vsm_mode', choices=['auto', 'standard', 'parallel', 'hybrid', 'sparse'], default='auto',
                         help='VSM implementation to use')
+    parser.add_argument('--parallel_index_threshold', type=int, default=IndexFactory.DEFAULT_PARALLEL_DOC_THRESHOLD,
+                       help=f'Document threshold for parallel index (default: {IndexFactory.DEFAULT_PARALLEL_DOC_THRESHOLD})')
+    parser.add_argument('--hybrid_vsm_threshold', type=int, default=VSMFactory.DEFAULT_HYBRID_DOC_THRESHOLD,
+                       help=f'Document threshold for hybrid vs parallel VSM (default: {VSMFactory.DEFAULT_HYBRID_DOC_THRESHOLD})')
+    parser.add_argument('--export_json', default=None,
+                        help='Export index to JSON file (specify filename)')
+    parser.add_argument('--stats', action='store_true',
+                        help='Display detailed index statistics')
+    parser.add_argument('--check_deps', action='store_true',
+                        help='Check and display available dependencies')
     return parser.parse_args()
+
+def display_dependencies():
+    """Display available dependencies."""
+    vsm_deps = VSMFactory.check_dependencies()
+    mp_available = IndexFactory.check_multiprocessing()
+    
+    print("\n=== Available Dependencies ===")
+    print(f"NumPy: {'Available' if vsm_deps['numpy'] else 'Not Available'}")
+    print(f"SciPy Sparse: {'Available' if vsm_deps['scipy.sparse'] else 'Not Available'}")
+    print(f"Scikit-learn Metrics: {'Available' if vsm_deps['sklearn.metrics'] else 'Not Available'}")
+    print(f"Multiprocessing: {'Available' if mp_available else 'Not Available'}")
+    
+    print("\n=== Recommended Implementations ===")
+    if vsm_deps['scipy.sparse'] and vsm_deps['sklearn.metrics']:
+        print("VSM: Sparse (optimal)")
+    elif mp_available:
+        print("VSM: Hybrid/Parallel (good)")
+    else:
+        print("VSM: Standard (basic)")
+        
+    print(f"Index: {'Parallel' if mp_available else 'Standard'} (based on dataset size)")
+    print("=" * 61)
 
 def display_banner():
     print("=" * 61)
@@ -30,11 +62,39 @@ def display_banner():
     print("Last Name : Branson")
     print("=" * 61)
 
-def display_vocabulary_statistics(index: MemoryIndex):
+def display_vocabulary_statistics(index):
     print(f"\nThe number of unique words is: {index.vocab_size}")
     print("The top 10 most frequent words are:")
     for i, (term, freq) in enumerate(index.get_most_frequent_terms(n=10), 1):
         print(f"    {i}. {term} ({freq:,})")
+    print("=" * 61)
+
+def display_detailed_statistics(index):
+    """Display detailed statistics about the index."""
+    stats = index.get_statistics()
+    
+    print("\n=== Index Statistics ===")
+    print(f"Total Documents: {stats['document_count']:,}")
+    print(f"Vocabulary Size: {stats['vocabulary_size']:,}")
+    print(f"Average Document Length: {stats['avg_doc_length']:.2f} terms")
+    print(f"Max Document Length: {stats['max_doc_length']:,} terms")
+    print(f"Min Document Length: {stats['min_doc_length']:,} terms")
+    print(f"Average Term Frequency: {stats['avg_term_freq']:.2f}")
+    print(f"Average Document Frequency: {stats['avg_doc_freq']:.2f}")
+    
+    print("\n=== Memory Usage ===")
+    for key, value in stats['memory_usage'].items():
+        if value > 1024 * 1024 * 1024:
+            formatted = f"{value / (1024 * 1024 * 1024):.2f} GB"
+        elif value > 1024 * 1024:
+            formatted = f"{value / (1024 * 1024):.2f} MB"
+        elif value > 1024:
+            formatted = f"{value / 1024:.2f} KB"
+        else:
+            formatted = f"{value:,} bytes"
+        
+        print(f"{key}: {formatted}")
+    
     print("=" * 61)
 
 def get_valid_int_input(prompt):
@@ -69,35 +129,47 @@ def main():
     args = parse_arguments()
     profiler = Profiler()
     profiler.start_global_timer()
+    
+    if args.check_deps:
+        display_dependencies()
 
     if args.use_existing and os.path.exists(args.index_file):
         with profiler.timer("Index Loading"):
-            index = MemoryIndex.load(args.index_file)
+            from src.index.standard_index import StandardIndex
+            index = StandardIndex.load(args.index_file)
     else:
-        text_processor = TextProcessorFactory.create_processor(
+        index = IndexFactory.create_index(
             documents_dir=args.documents_dir,
             stopwords_file=args.stopwords_file,
             special_chars_file=args.special_chars_file,
             profiler=profiler,
-            mode=args.tp_mode
+            mode=args.index_mode,
+            parallel_threshold=args.parallel_index_threshold
         )
+        index.build_index()
 
-        filenames, term_freqs = text_processor.process_documents()
+        with profiler.timer("Index Saving"):
+            index.save(args.index_file)
 
-        index = MemoryIndex()
-        with profiler.timer("Index Building"):
-            for filename, freq_dict in zip(filenames, term_freqs):
-                index.add_document(freq_dict, filename)
-        
-        index.save(args.index_file)
-    from src.vsm.factory import VSMFactory
-    vsm = VSMFactory.create_vsm(index, args.vsm_mode, profiler)
+    if args.export_json:
+        with profiler.timer("JSON Export"):
+            index.export_json(args.export_json)
+            print(f"Index exported to {args.export_json}")
+
+    vsm = VSMFactory.create_vsm(
+        index, 
+        args.vsm_mode, 
+        profiler,
+        hybrid_threshold=args.hybrid_vsm_threshold
+    )
 
     profiler.pause_global_timer()
 
-    # Display Information
     display_banner()
     display_vocabulary_statistics(index)
+
+    if args.stats:
+        display_detailed_statistics(index)
 
     # Get user input
     k = get_valid_int_input("\nEnter the number of top similar document pairs (k): ")

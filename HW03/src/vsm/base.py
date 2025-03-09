@@ -1,10 +1,10 @@
 # src/vsm/base_vsm.py
 from typing import List, Tuple
 from src.performance_monitoring import Profiler
-from src.index import MemoryIndex
+from src.index import BaseIndex
 
 class BaseVSM:
-    def __init__(self, index: MemoryIndex, profiler: Profiler = None):
+    def __init__(self, index: BaseIndex, profiler: Profiler = None):
         self.index = index
         self.profiler = profiler or Profiler()
         self.weights = {'tf': {}, 'tfidf': {}, 'sublinear': {}}
