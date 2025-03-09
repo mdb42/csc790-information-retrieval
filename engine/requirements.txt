@@ -1,3 +1,0 @@
-requests
-bs4
-nltk==3.9.1

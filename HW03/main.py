@@ -95,7 +95,7 @@ def display_detailed_statistics(index):
         
         print(f"{key}: {formatted}")
     
-    print("=" * 61)
+    print("\n"+"=" * 61)
 
 def get_valid_int_input(prompt):
     while True:
@@ -176,17 +176,15 @@ def main():
 
     profiler.resume_global_timer()
 
-    # Find similar documents
+    # Display similar documents
     display_similar_documents(vsm, k)
 
-    # Final reporting
-    log_report = profiler.write_log_file(
-        filename="performance.log",
+    # Time reporting
+    print("\n"+profiler.generate_report(
         doc_count=index.doc_count,
-        vocab_size=index.vocab_size
-    )
-
-    print("\n"+log_report)
+        vocab_size=index.vocab_size,
+        filename="performance.log"
+    ))
 
 if __name__ == "__main__":
     main()

@@ -35,8 +35,8 @@ class Profiler:
             return self.paused_time
         return time.time() - self.start_time + self.paused_time
     
-    def generate_report(self, doc_count: int, vocab_size: int) -> str:
-        """Returns formatted performance report as string"""
+    def generate_report(self, doc_count: int, vocab_size: int, filename: str = None) -> str:
+        """Returns formatted performance report as string and optionally writes to a file"""
         report = StringIO()
         
         report.write("=== Timing Breakdown ===\n")
@@ -46,14 +46,13 @@ class Profiler:
         tracked_total = sum(self.timings.values())
         report.write(f"\nTracked Operations Total: {tracked_total:.4f}s\n")
         
-        return report.getvalue()
-
-    def write_log_file(self, filename: str, doc_count: int, vocab_size: int):
-        """Writes report to file and returns it for display"""
-        report = self.generate_report(doc_count, vocab_size)
-        with open(filename, "w") as f:
-            f.write(report)
-        return report
+        report_content = report.getvalue()
+        
+        if filename:
+            with open(filename, "w") as f:
+                f.write(report_content)
+        
+        return report_content
 
 class Timer:
     def __init__(self, task_name, profiler):
