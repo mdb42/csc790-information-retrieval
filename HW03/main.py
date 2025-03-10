@@ -2,100 +2,83 @@
 import os
 import argparse
 from src.performance_monitoring import Profiler
-from src.index.factory import IndexFactory
-from src.vsm.factory import VSMFactory
+from src.index import IndexFactory
+from src.vsm import VSMFactory
+from src.utils import display_detailed_statistics, display_dependencies
 
 def parse_arguments():
+    from src.utils import load_config, save_config
+    config = load_config()
     parser = argparse.ArgumentParser(description='Vector space model for document similarity.')
-    parser.add_argument('--documents_dir', default='documents', 
-                        help='Directory containing documents to index')
-    parser.add_argument('--stopwords_file', default='stopwords.txt', 
-                        help='File containing stopwords')
-    parser.add_argument('--special_chars_file', default='special_chars.txt', 
-                        help='File containing special characters to remove')
-    parser.add_argument('--index_file', default='index.pkl', 
-                        help='Path to save/load the index')
+    parser.add_argument('--config', default='config.json', 
+                        help='Path to configuration file')
+    parser.add_argument('--documents_dir', default=config['documents_dir'], 
+                        help=f"Directory containing documents to index (default: {config['documents_dir']})")
+    parser.add_argument('--stopwords_file', default=config['stopwords_file'], 
+                        help=f"File containing stopwords (default: {config['stopwords_file']})")
+    parser.add_argument('--special_chars_file', default=config['special_chars_file'], 
+                        help=f"File containing special characters to remove (default: {config['special_chars_file']})")
+    parser.add_argument('--index_file', default=config['index_file'], 
+                        help=f"Path to save/load the index (default: {config['index_file']})")
     parser.add_argument('--use_existing', action='store_true', 
                         help='Use existing index if available')
-    parser.add_argument('--index_mode', choices=['auto', 'standard', 'parallel'], default='auto',
-                        help='Index implementation to use')
-    parser.add_argument('--vsm_mode', choices=['auto', 'standard', 'parallel', 'hybrid', 'sparse'], default='auto',
-                        help='VSM implementation to use')
-    parser.add_argument('--parallel_index_threshold', type=int, default=IndexFactory.DEFAULT_PARALLEL_DOC_THRESHOLD,
-                       help=f'Document threshold for parallel index (default: {IndexFactory.DEFAULT_PARALLEL_DOC_THRESHOLD})')
-    parser.add_argument('--hybrid_vsm_threshold', type=int, default=VSMFactory.DEFAULT_HYBRID_DOC_THRESHOLD,
-                       help=f'Document threshold for hybrid vs parallel VSM (default: {VSMFactory.DEFAULT_HYBRID_DOC_THRESHOLD})')
+    parser.add_argument('--index_mode', choices=['auto', 'standard', 'parallel'], default=config['index_mode'],
+                        help=f"Index implementation to use (default: {config['index_mode']})")
+    parser.add_argument('--vsm_mode', 
+                        choices=['auto', 'standard', 'parallel', 'hybrid', 'sparse', 'experimental'], 
+                        default=config['vsm_mode'],
+                        help=f"VSM implementation to use (default: {config['vsm_mode']})")
+    parser.add_argument('--parallel_index_threshold', type=int, default=config['parallel_index_threshold'],
+                       help=f"Document threshold for parallel index (default: {config['parallel_index_threshold']})")
+    parser.add_argument('--hybrid_vsm_threshold', type=int, default=config['hybrid_vsm_threshold'],
+                       help=f"Document threshold for hybrid VSM (default: {config['hybrid_vsm_threshold']})")
+    parser.add_argument('--chunk_size', type=int, default=config.get('chunk_size', 1000),
+                       help=f"Chunk size for experimental VSM (default: {config.get('chunk_size', 1000)})")
     parser.add_argument('--export_json', default=None,
                         help='Export index to JSON file (specify filename)')
     parser.add_argument('--stats', action='store_true',
                         help='Display detailed index statistics')
     parser.add_argument('--check_deps', action='store_true',
                         help='Check and display available dependencies')
-    return parser.parse_args()
-
-def display_dependencies():
-    """Display available dependencies."""
-    vsm_deps = VSMFactory.check_dependencies()
-    mp_available = IndexFactory.check_multiprocessing()
+    parser.add_argument('--save_config', action='store_true',
+                        help='Save current settings to config file')
     
-    print("\n=== Available Dependencies ===")
-    print(f"NumPy: {'Available' if vsm_deps['numpy'] else 'Not Available'}")
-    print(f"SciPy Sparse: {'Available' if vsm_deps['scipy.sparse'] else 'Not Available'}")
-    print(f"Scikit-learn Metrics: {'Available' if vsm_deps['sklearn.metrics'] else 'Not Available'}")
-    print(f"Multiprocessing: {'Available' if mp_available else 'Not Available'}")
+    args = parser.parse_args()
     
-    print("\n=== Recommended Implementations ===")
-    if vsm_deps['scipy.sparse'] and vsm_deps['sklearn.metrics']:
-        print("VSM: Sparse (optimal)")
-    elif mp_available:
-        print("VSM: Hybrid/Parallel (good)")
-    else:
-        print("VSM: Standard (basic)")
+    if args.config != 'config.json' and os.path.exists(args.config):
+        new_config = load_config(args.config)
         
-    print(f"Index: {'Parallel' if mp_available else 'Standard'} (based on dataset size)")
-    print("=" * 61)
-
-def display_banner():
-    print("=" * 61)
-    print("=" * 19 + " CSC790-IR Homework 03 " + "=" * 19)
-    print("First Name: Matthew")
-    print("Last Name : Branson")
-    print("=" * 61)
-
-def display_vocabulary_statistics(index):
-    print(f"\nThe number of unique words is: {index.vocab_size}")
-    print("The top 10 most frequent words are:")
-    for i, (term, freq) in enumerate(index.get_most_frequent_terms(n=10), 1):
-        print(f"    {i}. {term} ({freq:,})")
-    print("=" * 61)
-
-def display_detailed_statistics(index):
-    """Display detailed statistics about the index."""
-    stats = index.get_statistics()
-    
-    print("\n=== Index Statistics ===")
-    print(f"Total Documents: {stats['document_count']:,}")
-    print(f"Vocabulary Size: {stats['vocabulary_size']:,}")
-    print(f"Average Document Length: {stats['avg_doc_length']:.2f} terms")
-    print(f"Max Document Length: {stats['max_doc_length']:,} terms")
-    print(f"Min Document Length: {stats['min_doc_length']:,} terms")
-    print(f"Average Term Frequency: {stats['avg_term_freq']:.2f}")
-    print(f"Average Document Frequency: {stats['avg_doc_freq']:.2f}")
-    
-    print("\n=== Memory Usage ===")
-    for key, value in stats['memory_usage'].items():
-        if value > 1024 * 1024 * 1024:
-            formatted = f"{value / (1024 * 1024 * 1024):.2f} GB"
-        elif value > 1024 * 1024:
-            formatted = f"{value / (1024 * 1024):.2f} MB"
-        elif value > 1024:
-            formatted = f"{value / 1024:.2f} KB"
-        else:
-            formatted = f"{value:,} bytes"
+        parser_defaults = {action.dest: action.default for action in parser._actions}
         
-        print(f"{key}: {formatted}")
+        import sys
+        provided_args = set()
+        for i, arg in enumerate(sys.argv[1:]):
+            if arg.startswith('--') and '=' not in arg and i+1 < len(sys.argv[1:]) and not sys.argv[i+2].startswith('--'):
+                provided_args.add(arg[2:])
+            elif arg.startswith('--') and '=' in arg:
+                provided_args.add(arg.split('=')[0][2:])
+        
+        for key, value in new_config.items():
+            if key in parser_defaults and key not in provided_args:
+                setattr(args, key, value)
     
-    print("\n"+"=" * 61)
+    if args.save_config:
+        current_config = {
+            'documents_dir': args.documents_dir,
+            'stopwords_file': args.stopwords_file,
+            'special_chars_file': args.special_chars_file,
+            'index_file': args.index_file,
+            'index_mode': args.index_mode,
+            'vsm_mode': args.vsm_mode,
+            'parallel_index_threshold': args.parallel_index_threshold,
+            'hybrid_vsm_threshold': args.hybrid_vsm_threshold,
+            'experimental_vsm_threshold': args.experimental_vsm_threshold,
+            'chunk_size': args.chunk_size
+        }
+        save_config(current_config, args.config)
+        print(f"Configuration saved to {args.config}")
+    
+    return args
 
 def get_valid_int_input(prompt):
     while True:
@@ -107,8 +90,23 @@ def get_valid_int_input(prompt):
         except ValueError:
             print("Invalid input. Please enter a valid number.")
 
+def display_banner():
+    print("=" * 55)
+    print("=" * 16 + " CSC790-IR Homework 03 " + "=" * 16)
+    print("First Name: Matthew")
+    print("Last Name : Branson")
+    print("=" * 55)
+
+def display_vocabulary_statistics(index):
+    print(f"The number of unique words is: {index.vocab_size}")
+    print("The top 10 most frequent words are:")
+    # Numbered display requirement makes this O(k) but the underlying heapq operation is O(n log k)
+    for i, (term, freq) in enumerate(index.get_most_frequent_terms(n=10), 1):
+        print(f"    {i}. {term} ({freq:,})")
+    print("=" * 56)
+
 def display_similar_documents(vsm, k):
-    print("\nThe top k closest documents are:")
+    print("The top k closest documents are:")
     weighting_schemes = [
         ("1. Using tf", "tf"),
         ("2. Using tfidf", "tfidf"),
@@ -116,7 +114,7 @@ def display_similar_documents(vsm, k):
     ]
     
     for label, weighting in weighting_schemes:
-        print(f"\n{label}:")
+        print(f"{label}:")
         similar_docs = vsm.find_similar_documents(k=k, weighting=weighting)
         
         if not similar_docs:
@@ -127,17 +125,27 @@ def display_similar_documents(vsm, k):
 
 def main():
     args = parse_arguments()
-    profiler = Profiler()
-    profiler.start_global_timer()
     
     if args.check_deps:
         display_dependencies()
 
+    k = get_valid_int_input("\nEnter the number of top similar document pairs (k): ")
+    display_banner()
+    
+    profiler = Profiler()
+    profiler.start_global_timer()
+
     if args.use_existing and os.path.exists(args.index_file):
         with profiler.timer("Index Loading"):
             from src.index.standard_index import StandardIndex
-            index = StandardIndex.load(args.index_file)
-    else:
+            try:
+                index = StandardIndex.load(args.index_file)
+            except Exception as e:
+                print(f"Error loading index from {args.index_file}: {e}")
+                print("Building new index instead...")
+                args.use_existing = False
+    
+    if not args.use_existing or not os.path.exists(args.index_file):
         index = IndexFactory.create_index(
             documents_dir=args.documents_dir,
             stopwords_file=args.stopwords_file,
@@ -163,23 +171,13 @@ def main():
         hybrid_threshold=args.hybrid_vsm_threshold
     )
 
-    profiler.pause_global_timer()
-
-    display_banner()
     display_vocabulary_statistics(index)
 
     if args.stats:
         display_detailed_statistics(index)
 
-    # Get user input
-    k = get_valid_int_input("\nEnter the number of top similar document pairs (k): ")
-
-    profiler.resume_global_timer()
-
-    # Display similar documents
     display_similar_documents(vsm, k)
 
-    # Time reporting
     print("\n"+profiler.generate_report(
         doc_count=index.doc_count,
         vocab_size=index.vocab_size,

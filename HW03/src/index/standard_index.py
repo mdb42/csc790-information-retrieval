@@ -1,4 +1,12 @@
 # src/index/standard_index.py
+"""
+New:
+- compiled the regex pattern once during initialization rather than for every document
+- sed os.scandir() instead of os.listdir() for better memory efficiency
+- stored references to reduce lookup overhead.
+- iterative memory usage calculation to prevent stack overflow with large datasets
+- used heapq.nlargest() for more selection of top terms
+"""
 import os
 import re
 import json
@@ -22,6 +30,10 @@ class StandardIndex(BaseIndex):
         self.stopwords = self._load_stopwords(stopwords_file)
         self.special_chars = self._load_special_chars(special_chars_file)
         
+        self.special_chars_pattern = None
+        if self.special_chars:
+            self.special_chars_pattern = re.compile(f'[{re.escape("".join(self.special_chars))}]')
+        
         try:
             nltk.data.find('tokenizers/punkt')
         except LookupError:
@@ -34,7 +46,7 @@ class StandardIndex(BaseIndex):
         self.filenames = []                      # doc_id -> filename
         self._doc_count = 0
         self._lock = Lock()  # Thread safety
-    
+
     def _load_stopwords(self, filepath):
         if not filepath:
             return set()
@@ -58,9 +70,8 @@ class StandardIndex(BaseIndex):
     def _preprocess_text(self, text: str) -> List[str]:
         tokens = word_tokenize(text.lower())
 
-        if self.special_chars:
-            pattern = re.compile(f'[{re.escape("".join(self.special_chars))}]')
-            tokens = [pattern.sub('', t) for t in tokens]
+        if self.special_chars_pattern:
+            tokens = [self.special_chars_pattern.sub('', t) for t in tokens]
 
         tokens = [t for t in tokens if t.isalpha() and t not in self.stopwords]
         tokens = [self.stemmer.stem(t) for t in tokens]
@@ -90,9 +101,8 @@ class StandardIndex(BaseIndex):
         
         timer_label = "Sequential Index Building"
         
-        filepaths = [os.path.join(self.documents_dir, f) 
-                    for f in os.listdir(self.documents_dir) 
-                    if f.endswith('.txt')]
+        filepaths = [entry.path for entry in os.scandir(self.documents_dir)
+                     if entry.is_file() and entry.name.endswith('.txt')]
         
         if self.profiler:
             with self.profiler.timer(timer_label):
@@ -121,8 +131,9 @@ class StandardIndex(BaseIndex):
             self.doc_term_freqs[doc_id] = term_freqs
             if filename:
                 self.filenames.append(filename)
+            term_doc_freqs = self.term_doc_freqs
             for term, freq in term_freqs.items():
-                self.term_doc_freqs[term][doc_id] = freq
+                term_doc_freqs[term][doc_id] = freq
             self._doc_count += 1
             return doc_id
     
@@ -133,10 +144,12 @@ class StandardIndex(BaseIndex):
         return len(self.term_doc_freqs.get(term, {}))
     
     def get_most_frequent_terms(self, n: int = 10) -> List[Tuple[str, int]]:
+        import heapq
         term_totals = {}
         for term, doc_freqs in self.term_doc_freqs.items():
             term_totals[term] = sum(doc_freqs.values())
-        return sorted(term_totals.items(), key=lambda x: x[1], reverse=True)[:n]
+
+        return heapq.nlargest(n, term_totals.items(), key=lambda x: x[1])
     
     def save(self, filepath: str) -> None:
         with open(filepath, 'wb') as f:
@@ -158,22 +171,30 @@ class StandardIndex(BaseIndex):
         return index
     
     def get_memory_usage(self) -> Dict[str, int]:
-        seen = set()
+        def sizeof_iterative(obj):
+            seen = set()
+            to_process = [obj]
+            total_size = 0
+            
+            while to_process:
+                current = to_process.pop()
+                if id(current) in seen:
+                    continue
+                    
+                seen.add(id(current))
+                total_size += getsizeof(current)
+                
+                if isinstance(current, dict):
+                    to_process.extend(current.keys())
+                    to_process.extend(current.values())
+                elif isinstance(current, (list, tuple, set)):
+                    to_process.extend(current)
+                    
+            return total_size
         
-        def sizeof(obj):
-            if id(obj) in seen:
-                return 0
-            seen.add(id(obj))
-            size = getsizeof(obj)
-            if isinstance(obj, dict):
-                size += sum(sizeof(k) + sizeof(v) for k, v in obj.items())
-            elif isinstance(obj, (list, tuple, set)):
-                size += sum(sizeof(x) for x in obj)
-            return size
-        
-        term_doc_size = sizeof(self.term_doc_freqs)
-        doc_term_size = sizeof(self.doc_term_freqs)
-        filenames_size = sizeof(self.filenames)
+        term_doc_size = sizeof_iterative(self.term_doc_freqs)
+        doc_term_size = sizeof_iterative(self.doc_term_freqs)
+        filenames_size = sizeof_iterative(self.filenames)
         total_size = term_doc_size + doc_term_size + filenames_size
         
         sample_data = {
@@ -203,6 +224,8 @@ class StandardIndex(BaseIndex):
         json_str = json.dumps(export_data, indent=2)
         
         if filepath:
+            if not filepath.endswith(".json"):
+                filepath += ".json"
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(json_str)
             return None

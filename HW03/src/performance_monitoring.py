@@ -7,6 +7,7 @@ class Profiler:
         self.timings = {}
         self.start_time = None
         self.paused_time = 0.0
+        self.log_buffer = StringIO()
 
     def timer(self, task_name):
         """Returns a context manager to time a code block."""
@@ -38,13 +39,17 @@ class Profiler:
     def generate_report(self, doc_count: int, vocab_size: int, filename: str = None) -> str:
         """Returns formatted performance report as string and optionally writes to a file"""
         report = StringIO()
-        
+
+        report.write("=== Message Log ===\n")
+        report.write(self.log_buffer.getvalue())
+   
         report.write("=== Timing Breakdown ===\n")
         for task, duration in self.timings.items():
             report.write(f"{task}: {duration:.4f}s\n")
         
         tracked_total = sum(self.timings.values())
         report.write(f"\nTracked Operations Total: {tracked_total:.4f}s\n")
+        report.write(f"Total Execution Time: {self.get_global_time():.4f}s\n\n")
         
         report_content = report.getvalue()
         
@@ -53,6 +58,10 @@ class Profiler:
                 f.write(report_content)
         
         return report_content
+    
+    def log_message(self, message):
+        """Logs a message to the buffer."""
+        self.log_buffer.write(f"{message}\n")
 
 class Timer:
     def __init__(self, task_name, profiler):
