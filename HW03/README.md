@@ -213,10 +213,11 @@ flowchart TD
     docQ2 -->|Yes| parallelVSM[Use ParallelVSM]
     
     %% Styling
-    classDef standard fill:#f9f9f9,stroke:#333,stroke-width:1px
-    classDef decision fill:#e1f5fe,stroke:#01579b,stroke-width:1px
-    classDef parallel fill:#e8f5e9,stroke:#2e7d32,stroke-width:1px
-    classDef sparse fill:#f3e5f5,stroke:#6a1b9a,stroke-width:1px
+    classDef standard fill:#4a4a4a,stroke:#000,stroke-width:2px,color:#fff;
+    classDef decision fill:#1f78b4,stroke:#000,stroke-width:2px,color:#fff;
+    classDef parallel fill:#33a02c,stroke:#000,stroke-width:2px,color:#fff;
+    classDef sparse fill:#6a3d9a,stroke:#000,stroke-width:2px,color:#fff;
+
     
     class start,indexQ,multiQ1,multiQ2,docQ1,docQ2,depsQ decision
     class stdIndex,stdVSM standard
