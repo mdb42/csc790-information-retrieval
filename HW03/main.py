@@ -1,6 +1,6 @@
 """
 CSC 790 Information Retrieval
-HW03: Vector Space Model for Document Similarity
+Homework 3: Vector Space Model for Document Similarity
 Author: Matthew Branson
 Date: March 14, 2025
 

@@ -1,4 +1,4 @@
-# src/vsm/base_vsm.py
+# src/vsm/base.py
 """
 Base Vector Space Model Interface
 Author: Matthew Branson

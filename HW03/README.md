@@ -4,6 +4,8 @@ Homework 3: Document Similarity Analysis
 
 Author: Matthew Branson
 
+GitHub: [Homework 3](https://github.com/mdb42/csc790-information-retrieval/tree/main/HW03)
+
 ## Overview
 
 This project implements an optimized and configurable system for analyzing document similarity using Vector Space Models (VSM).
@@ -12,11 +14,10 @@ Features include:
 - Document indexing with term frequency, inverse document frequency (TF-IDF), and sublinear scaling (Wf-IDF) weighting schemes
 - Document similarity calculation using cosine similarity
 - Factory pattern for runtime selection of optimal implementations
-- Strategy pattern for interchangeable algorithms
 - Object-oriented design with abstract base classes
 - Performance profiling and reporting utilities
 - Parallel processing for large datasets
-- Memory-efficient data structures using sparse matrices
+- Highly optimizid approach using sparse matrices
 
 ## Installation
 
@@ -135,7 +136,7 @@ document-similarity/
 │   │   ├── standard_index.py  # Single-threaded reference implementation
 │   │   └── parallel_index.py  # Multi-threaded implementation for large datasets
 │   ├── vsm/                # Vector Space Model subsystem
-│   │   ├── base_vsm.py     # Abstract base class for VSM implementations
+│   │   ├── base.py         # Abstract base class for VSM implementations
 │   │   ├── factory.py      # Factory for selecting optimal VSM implementation
 │   │   ├── standard_vsm.py # Sequential implementation for small datasets
 │   │   ├── parallel_vsm.py # Parallel implementation for medium-large datasets
@@ -173,7 +174,7 @@ The indexing subsystem is responsible for processing documents, extracting terms
 
 The VSM subsystem is responsible for computing document similarities using the vector space model.
 
-**src/vsm/base_vsm.py** defines the BaseVSM abstract class with the core interface. This was an especially useful approach for optimization, allowing me to parallelize different parts of the VSM calculation independently and benchmark the performance of each. The three concrete implementations provided represent the best combination of approaches for each scenario derived from five experimental implementations tested across document collections ranging from 1,000 documents to 30,000 documents.
+**src/vsm/base_vsm.py** defines the BaseVSM abstract class with the core interface. This was an especially useful approach for optimization, allowing me to parallelize different parts of the VSM calculation independently and benchmark the performance of each. The three concrete implementations provided represent the best combination of approaches for each scenario derived from five experimental implementations tested across document collections ranging from 1,000 documents to 30,000 documents, generated from chunking public domain literature retrieved from Project Gutenberg.
 
 **src/vsm/factory.py** implements the factory pattern for selecting the appropriate VSM implementation.
 
@@ -253,21 +254,14 @@ Performance comparison (runtime in seconds):
 | -------------- | --------- | -------- | ------- |
 | 1000 Docs      | 2.8422    | 11.9635  | 1.0132  |
 | 2000 Docs      | 9.8976    | 15.1696  | 1.9903  |
-| 3000 Docs      | 18.5161   | 19.0588  | 3.0039  |
+| 3000 Docs      | 18.5161   | 18.0588  | 3.0039  |
 | 4000 Docs      | 31.8160   | 22.3296  | 4.0728  |
 | 5000 Docs      | 48.5661   | 25.7587  | 4.9694  |
 | 15000 Docs     | 449.5013  | 101.2593 | 20.9662 |
 | 30000 Docs     | 1928.2886 | 368.9252 | 55.8942 |
 
-Parallelization threshold fine-tuning results:
-
-| Fine-Tuning Datasets | Standard | Parallel |
-| -------------------- | -------- | -------- |
-| 2500 Docs            | 13.6522  | 14.2365  |
-| 2600 Docs            | 15.6922  | 14.9760  |
-
 The crossover point where ParallelVSM becomes more efficient than StandardVSM
-is around 2500-2600 documents.
+is around 2500 documents.
 
 ### Indexing Implementation Benchmarking
 
