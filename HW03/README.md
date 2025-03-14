@@ -1,4 +1,7 @@
-# Document Similarity Analysis System
+# CSC 790 Information Retrieval
+
+Homework 3: Document Similarity Analysis
+Author: Matthew Branson
 
 ## Overview
 
@@ -242,7 +245,7 @@ These thresholds were determined through extensive benchmarking to identify the 
 
 Performance comparison (runtime in seconds):
 
-[Figure 1](figures\figure_1.png)
+![Figure 1](figures\figure_1.png)
 
 | Document Count | Standard  | Parallel | Sparse  |
 | -------------- | --------- | -------- | ------- |
@@ -268,7 +271,7 @@ is around 2500-2600 documents.
 
 Performance comparison (index building time in seconds):
 
-[Figure 2](figures\figure_2.png)
+![Figure 2](figures\figure_2.png)
 
 | Document Count | Standard Index | Parallel Index |
 | -------------- | -------------- | -------------- |
