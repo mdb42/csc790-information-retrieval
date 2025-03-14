@@ -198,18 +198,18 @@ flowchart TD
     start[Start Selection] --> indexQ{Index or VSM?}
     
     %% Index Selection Path
-    indexQ -->|Index| multiQ1{Multiprocessing\nAvailable?}
+    indexQ -->|Index| multiQ1{Multiprocessing Available?}
     multiQ1 -->|No| stdIndex[Use StandardIndex]
-    multiQ1 -->|Yes| docQ1{Document Count\n≥ 5,000?}
+    multiQ1 -->|Yes| docQ1{Document Count ≥ 5,000?}
     docQ1 -->|No| stdIndex
     docQ1 -->|Yes| parallelIndex[Use ParallelIndex]
     
     %% VSM Selection Path
-    indexQ -->|VSM| depsQ{NumPy, SciPy,\nscikit-learn\nAvailable?}
+    indexQ -->|VSM| depsQ{NumPy, SciPy, scikit-learn Available?}
     depsQ -->|Yes| sparseVSM[Use SparseVSM]
-    depsQ -->|No| multiQ2{Multiprocessing\nAvailable?}
+    depsQ -->|No| multiQ2{Multiprocessing Available?}
     multiQ2 -->|No| stdVSM[Use StandardVSM]
-    multiQ2 -->|Yes| docQ2{Document Count\n≥ 2,500?}
+    multiQ2 -->|Yes| docQ2{Document Count ≥ 2,500?}
     docQ2 -->|No| stdVSM
     docQ2 -->|Yes| parallelVSM[Use ParallelVSM]
     

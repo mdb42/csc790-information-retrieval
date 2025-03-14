@@ -49,7 +49,7 @@ def _compute_weights_for_doc(term_counts: Dict[str, int],
         tfidf[term] = tfidf_val
         tfidf_sq += tfidf_val * tfidf_val
         
-        # Sublinear TF-IDF
+        # Sublinear WF-IDF
         sublinear_val = (1 + math.log10(freq)) * idf if freq > 0 else 0
         sublinear[term] = sublinear_val
         sublinear_sq += sublinear_val * sublinear_val
