@@ -1,6 +1,7 @@
 # CSC 790 Information Retrieval
 
 Homework 3: Document Similarity Analysis
+
 Author: Matthew Branson
 
 ## Overview
