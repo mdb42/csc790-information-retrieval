@@ -290,6 +290,8 @@ is around 5000 documents, as shown in the performance data above.
 
 ### Performance on Given Dataset
 
+Performance on the given dataset (runtime in seconds):
+
 |                  | Standard VSM | Parallel VSM | Sparse VSM |
 |------------------|--------------|--------------|------------|
 | Sequential Index | 8.2119       | 10.3087      | 2.1644     |
