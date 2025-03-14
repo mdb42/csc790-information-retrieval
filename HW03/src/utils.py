@@ -1,11 +1,26 @@
 # src/utils.py
+"""
+Utility Functions
+Author: Matthew Branson
+Date: March 14, 2025
+
+This module provides utility functions for loading and saving configuration,
+formatting memory sizes, displaying detailed index statistics, and checking dependencies.
+"""
 import json
 import os
 from src.index.factory import IndexFactory
 from src.vsm.factory import VSMFactory
 
 def load_config(config_file='config.json'):
-    """Load configuration from JSON file, falling back to defaults if not found."""
+    """Load configuration from JSON file, falling back to defaults if not found.
+    
+    Args:
+        config_file (str): Path to the configuration file
+    
+    Returns:
+        dict: The loaded configuration
+    """
     if not os.path.exists(config_file):
         return ensure_config_exists(config_file)
         
@@ -22,7 +37,7 @@ def load_config(config_file='config.json'):
             'index_mode': 'auto',
             'vsm_mode': 'auto',
             'parallel_index_threshold': IndexFactory.DEFAULT_PARALLEL_DOC_THRESHOLD,
-            'hybrid_vsm_threshold': VSMFactory.DEFAULT_HYBRID_DOC_THRESHOLD
+            'parallel_vsm_threshold': VSMFactory.DEFAULT_PARALLEL_DOC_THRESHOLD
         }
         
         # Ensure all needed keys exist by combining with defaults
@@ -34,7 +49,12 @@ def load_config(config_file='config.json'):
         return ensure_config_exists(config_file)
 
 def save_config(config, config_file='config.json'):
-    """Save current configuration to JSON file."""
+    """Save current configuration to JSON file.
+    
+    Args:
+        config (dict): The configuration to save
+        config_file (str): Path to the configuration file
+    """
     with open(config_file, 'w') as f:
         json.dump(config, f, indent=2)
 
@@ -60,7 +80,7 @@ def ensure_config_exists(config_file='config.json'):
         'index_mode': 'auto',
         'vsm_mode': 'auto',
         'parallel_index_threshold': IndexFactory.DEFAULT_PARALLEL_DOC_THRESHOLD,
-        'hybrid_vsm_threshold': VSMFactory.DEFAULT_HYBRID_DOC_THRESHOLD
+        'parallel_vsm_threshold': VSMFactory.DEFAULT_PARALLEL_DOC_THRESHOLD
     }
     
     # Save the default configuration
@@ -73,7 +93,14 @@ def ensure_config_exists(config_file='config.json'):
     return default_config
 
 def format_memory_size(value):
-    """Format memory size to human-readable format."""
+    """Format memory size to human-readable format.
+    
+    Args:
+        value (int): Memory size in bytes
+        
+    Returns:
+        str: Formatted memory size with units
+    """
     if value > 1024 * 1024 * 1024:
         return f"{value / (1024 * 1024 * 1024):.2f} GB"
     elif value > 1024 * 1024:
@@ -84,7 +111,11 @@ def format_memory_size(value):
         return f"{value:,} bytes"    
 
 def display_detailed_statistics(index):
-    """Display detailed statistics about the index."""
+    """Display detailed statistics about the index.
+    
+    Args:
+        index (BaseIndex): The index instance to analyze
+    """
     stats = index.get_statistics()
     
     print("\n=== Index Statistics ===")
@@ -117,11 +148,10 @@ def display_dependencies():
     if vsm_deps['scipy.sparse'] and vsm_deps['sklearn.metrics']:
         print("VSM: Sparse (optimal)")
     elif mp_available:
-        print("VSM: Hybrid/Parallel (good)")
+        print("VSM: Parallel (good)")
     else:
         print("VSM: Standard (basic)")
     
-    # Update index recommendation to mention dataset size threshold
     if mp_available:
         print(f"Index: Parallel (for datasets > {IndexFactory.DEFAULT_PARALLEL_DOC_THRESHOLD} documents)")
         print(f"       Standard (for smaller datasets)")
