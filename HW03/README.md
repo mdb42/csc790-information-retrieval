@@ -120,7 +120,7 @@ The project is designed using a modular, extensible architecture with clear sepa
 ### Architectural Overview
 
 ```
-document-similarity/
+HW03/
 ├── main.py                 # Entry point and CLI interface
 ├── figures/                # Performance analysis figures
 │   ├── figure_1.png        # VSM implementation benchmarking
