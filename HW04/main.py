@@ -17,15 +17,11 @@ import argparse
 import sys
 from src.profiler import Profiler
 from src.index import IndexFactory
-from src.retrieval.vsm import VSMFactory
+from src.retrieval_bm25 import RetrievalBM25
 
-from src.utils import ( display_banner, # Required in all projects
-                        display_dependencies, # Used by factories for concrete implementation selection
-                        display_vocabulary_statistics, # Feature since HW01 (inverted index)
+from src.utils import ( display_vocabulary_statistics, # Feature since HW01 (inverted index)
                         display_detailed_statistics, # Initially as memory report since HW01 (inverted index)
-                        display_similar_documents, # Feature since HW03 (vector space model)
-                        load_config, # When defaults and CLI args just aren't enough
-                        get_valid_int_input ) # Top k input for similar documents since HW03 (vector space model)
+                        load_config) # When defaults and CLI args just aren't enough
 
 def parse_arguments():
     """
@@ -36,8 +32,12 @@ def parse_arguments():
     """
     config = load_config()
     parser = argparse.ArgumentParser(description='Vector space model for document similarity.')
+
+    # General Options
     parser.add_argument('--config', default='config.json', 
                         help='Path to configuration file')
+    parser.add_argument('--queries_file', default=config['queries_file'],
+                        help=f"File containing queries to evaluate (default: {config['queries_file']})")
     parser.add_argument('--documents_dir', default=config['documents_dir'], 
                         help=f"Directory containing documents to index (default: {config['documents_dir']})")
     parser.add_argument('--stopwords_file', default=config['stopwords_file'], 
@@ -48,27 +48,23 @@ def parse_arguments():
                         help=f"Path to save/load the index (default: {config['index_file']})")
     parser.add_argument('--use_existing', action='store_true', 
                         help='Use existing index if available')
-    parser.add_argument('--top_k', type=int, default=None,
-                        help='Number of top similar document pairs to display (if not provided, will prompt)')
-    parser.add_argument('--index_mode', choices=['auto', 'standard', 'parallel'], default=config['index_mode'],
-                        help=f"Index implementation to use (default: {config['index_mode']})")
-    parser.add_argument('--vsm_mode', 
-                        choices=['auto', 'standard', 'parallel', 'sparse'], 
-                        default=config['vsm_mode'],
-                        help=f"VSM implementation to use (default: {config['vsm_mode']})")
-    parser.add_argument('--parallel_index_threshold', type=int, default=config['parallel_index_threshold'],
-                       help=f"Document threshold for parallel index (default: {config['parallel_index_threshold']})")
-    parser.add_argument('--parallel_vsm_threshold', type=int, default=config['parallel_vsm_threshold'],
-                       help=f"Document threshold for Parallel VSM (default: {config['parallel_vsm_threshold']})")
-    parser.add_argument('--parallelize_weights', action='store_true',
-                       help='Parallelize weight computation in ParallelVSM (for benchmarking)')
     parser.add_argument('--export_json', default=None,
                         help='Export index to JSON file (specify filename)')
     parser.add_argument('--stats', action='store_true',
                         help='Display detailed index statistics')
-    parser.add_argument('--check_deps', action='store_true',
-                        help='Check and display available dependencies')
     
+    # Indexing Options
+    parser.add_argument('--index_mode', choices=['auto', 'standard', 'parallel'], default=config['index_mode'],
+                        help=f"Index implementation to use (default: {config['index_mode']})")    
+    parser.add_argument('--parallel_index_threshold', type=int, default=config['parallel_index_threshold'],
+                       help=f"Document threshold for parallel index (default: {config['parallel_index_threshold']})")
+    
+    # BM25 Options
+    parser.add_argument('--bm25_k1', type=float, default=config['bm25_k1'],
+                        help=f"BM25 k1 parameter (default: {config['bm25_k1']})")
+    parser.add_argument('--bm25_b', type=float, default=config['bm25_b'],
+                        help=f"BM25 b parameter (default: {config['bm25_b']})")
+
     args = parser.parse_args()
     
     # If a non-default config file is specified and exists, load it and apply values
@@ -94,21 +90,46 @@ def parse_arguments():
     
     return args
 
+def display_banner():
+    """Display required banner."""
+    print("=" * 55)
+    print("=" * 16 + " CSC790-IR Homework 04 " + "=" * 16)
+    print("First Name: Matthew")
+    print("Last Name : Branson")
+    print("=" * 55)
+
+def process_queries(model, queries_file, profiler):
+    """
+    Process queries from a file and display results.
+    
+    Args:
+        model (BaseBM25): BM25 model to use for scoring
+        queries_file (str): Path to file containing queries
+        profiler (Profiler): Performance profiler for timing operations
+    """
+    with open(queries_file, 'r') as f:
+        queries = f.readlines()
+    
+    for query in queries:
+        query = query.strip()
+        if not query:
+            continue
+        
+        with profiler.timer(f"Query Processing: {query}"):
+            results = model.search(query)
+        
+        print(f"\nQuery: {query}")
+        if results:
+            for i, (doc_id, score) in enumerate(results, 1):
+                print(f"{i}. Document ID: {doc_id}, Score: {score:.4f}")
+        else:
+            print("No results found")
+
 def main():
     """
     Main function to run the vector space model analysis.
     """
     args = parse_arguments()
-    
-    # Check dependencies if requested
-    if args.check_deps:
-        display_dependencies()
-
-    # Use provided top_k argument or prompt the user if not provided
-    if args.top_k is None:
-        k = get_valid_int_input("\nEnter the number of top similar document pairs (k): ")
-    else:
-        k = args.top_k
 
     display_banner()
     
@@ -149,23 +170,16 @@ def main():
             index.export_json(args.export_json)
             print(f"Index exported to {args.export_json}")
 
-    # Create vector space model
-    vsm = VSMFactory.create_vsm(
-        index, 
-        args.vsm_mode, 
-        profiler,
-        parallel_threshold=args.parallel_vsm_threshold,
-        parallelize_weights=args.parallelize_weights
-    )
+    # Create BM25 model
+    model = RetrievalBM25(index, profiler)
 
-    # Display statistics
-    display_vocabulary_statistics(index)
-
+    # Display detailed index statistics if requested
     if args.stats:
+        display_vocabulary_statistics(index)
         display_detailed_statistics(index)
 
-    # Display similar document pairs
-    display_similar_documents(vsm, k)
+    # Process queries and display results
+    process_queries(model, args.queries_file, profiler)
 
     # Generate and display performance report
     print("\n" + profiler.generate_report(

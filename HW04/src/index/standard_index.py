@@ -1,13 +1,4 @@
 # src/index/standard_index.py
-"""
-Standard Document Index
-Author: Matthew Branson
-Date: March 14, 2025
-
-This module implements a sequential document index that processes and indexes
-text documents. It provides efficient access to term frequencies and document
-frequencies needed for vector space model calculations.
-"""
 import os
 import re
 import json
@@ -26,36 +17,7 @@ from src.index.base import BaseIndex
 
 
 class StandardIndex(BaseIndex):
-    """
-    Standard implementation of a document index.
-    
-    This class provides a sequential document indexing implementation that
-    tokenizes, filters, and stems document text to create an inverted index.
-    It maintains two main index structures:
-    - A term-to-document index (for document frequency calculations)
-    - A document-to-term index (for term frequency calculations)
-    
-    Attributes:
-        stopwords (set): Set of stopwords to filter out
-        special_chars (set): Set of special characters to remove
-        special_chars_pattern (re.Pattern): Compiled regex for special character removal
-        stemmer (PorterStemmer): NLTK stemmer for word normalization
-        term_doc_freqs (defaultdict): Inverted index mapping terms to document frequencies
-        doc_term_freqs (defaultdict): Forward index mapping documents to term frequencies
-        filenames (list): List of document filenames indexed by document ID
-        _doc_count (int): Number of documents in the index
-        _lock (Lock): Thread safety lock for concurrent operations
-    """
     def __init__(self, documents_dir=None, stopwords_file=None, special_chars_file=None, profiler=None):
-        """
-        Initialize the StandardIndex.
-        
-        Args:
-            documents_dir (str, optional): Directory containing documents to index
-            stopwords_file (str, optional): File containing stopwords to remove
-            special_chars_file (str, optional): File containing special characters to remove
-            profiler (Profiler, optional): Performance profiler for timing operations
-        """
         super().__init__(documents_dir, stopwords_file, special_chars_file, profiler)
         
         # Load stopwords and special characters
@@ -83,15 +45,6 @@ class StandardIndex(BaseIndex):
         self._lock = Lock()  # Thread safety
 
     def _load_stopwords(self, filepath):
-        """
-        Load stopwords from a file.
-        
-        Args:
-            filepath (str): Path to the stopwords file
-            
-        Returns:
-            set: Set of stopwords, or empty set if file not found
-        """
         if not filepath:
             return set()
         try:
@@ -102,15 +55,6 @@ class StandardIndex(BaseIndex):
             return set()
 
     def _load_special_chars(self, filepath):
-        """
-        Load special characters from a file.
-        
-        Args:
-            filepath (str): Path to the special characters file
-            
-        Returns:
-            set: Set of special characters, or empty set if file not found
-        """
         if not filepath:
             return set()
         try:
@@ -121,15 +65,6 @@ class StandardIndex(BaseIndex):
             return set()
     
     def _preprocess_text(self, text: str) -> List[str]:
-        """
-        Preprocess and tokenize document text.
-
-        Args:
-            text (str): Raw document text
-            
-        Returns:
-            List[str]: List of preprocessed tokens
-        """
         # Tokenize and convert to lowercase
         tokens = word_tokenize(text.lower())
 
@@ -145,17 +80,6 @@ class StandardIndex(BaseIndex):
         return tokens
 
     def _process_single_file(self, filepath: str) -> Optional[Tuple[str, Dict[str, int]]]:
-        """
-        Process a single document file.
-        
-        Args:
-            filepath (str): Path to the document file
-            
-        Returns:
-            Optional[Tuple[str, Dict[str, int]]]: Tuple containing the filename
-                                                and term frequency dictionary,
-                                                or None if processing failed
-        """
         try:
             # Read file content with error handling for encoding issues
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -177,15 +101,6 @@ class StandardIndex(BaseIndex):
             return None
     
     def build_index(self):
-        """
-        Build the index by processing all documents in the documents directory.
-        
-        Returns:
-            StandardIndex: The index instance (self)
-            
-        Raises:
-            ValueError: If documents_dir is not specified
-        """
         if not self.documents_dir:
             raise ValueError("Cannot build index: documents_dir not specified")
         
@@ -213,37 +128,13 @@ class StandardIndex(BaseIndex):
     
     @property
     def doc_count(self) -> int:
-        """
-        Get the number of documents in the index.
-        
-        Returns:
-            int: Number of documents in the index
-        """
         return self._doc_count
     
     @property
     def vocab_size(self) -> int:
-        """
-        Get the size of the vocabulary (number of unique terms).
-        
-        Returns:
-            int: Number of unique terms in the index
-        """
         return len(self.term_doc_freqs)
     
     def add_document(self, term_freqs: dict, filename: str = None) -> int:
-        """
-        Add a single document to the index.
-
-        This method is thread-safe and updates both the forward and inverted indexes.
-        
-        Args:
-            term_freqs (dict): Dictionary mapping terms to their frequencies
-            filename (str, optional): Name of the document file
-            
-        Returns:
-            int: ID assigned to the document
-        """
         with self._lock:
             # Assign document ID and store term frequencies
             doc_id = self._doc_count
@@ -264,42 +155,29 @@ class StandardIndex(BaseIndex):
             self._doc_count += 1
             return doc_id
     
-    def get_term_freq(self, term: str, doc_id: int) -> int:
+    def get_document_lengths(self):
         """
-        Get the frequency of a term in a specific document.
+        Get the length of each document and the average document length.
         
-        Args:
-            term (str): The term to look up
-            doc_id (int): The document ID
-            
         Returns:
-            int: Frequency of the term in the document (0 if not found)
+            Tuple[Dict[int, int], float]: Document lengths dictionary and average length
         """
+        doc_lengths = {
+            doc_id: sum(term_freqs.values())
+            for doc_id, term_freqs in self.doc_term_freqs.items()
+        }
+        
+        avg_length = sum(doc_lengths.values()) / max(len(doc_lengths), 1)
+        
+        return doc_lengths, avg_length
+
+    def get_term_freq(self, term: str, doc_id: int) -> int:
         return self.doc_term_freqs.get(doc_id, {}).get(term, 0)
 
     def get_doc_freq(self, term: str) -> int:
-        """
-        Get the document frequency of a term (number of documents containing the term).
-        
-        Args:
-            term (str): The term to look up
-            
-        Returns:
-            int: Number of documents containing the term
-        """
         return len(self.term_doc_freqs.get(term, {}))
     
     def get_most_frequent_terms(self, n: int = 10) -> List[Tuple[str, int]]:
-        """
-        Get the n most frequent terms across all documents.
-        
-        Args:
-            n (int): Number of terms to return
-            
-        Returns:
-            List[Tuple[str, int]]: List of (term, frequency) tuples,
-                                  sorted by frequency in descending order
-        """
         import heapq
         
         # Calculate total frequency of each term across all documents
@@ -326,15 +204,6 @@ class StandardIndex(BaseIndex):
     
     @classmethod
     def load(cls, filepath: str):
-        """
-        Load an index from a file.
-        
-        Args:
-            filepath (str): Path to the saved index file
-            
-        Returns:
-            StandardIndex: The loaded index instance
-        """
         index = cls()
         with open(filepath, 'rb') as f:
             data = pickle.load(f)
@@ -346,15 +215,6 @@ class StandardIndex(BaseIndex):
         return index
     
     def get_memory_usage(self) -> Dict[str, int]:
-        """
-        Get memory usage statistics for the index.
-        
-        Uses an iterative approach to calculate memory usage to prevent
-        stack overflow with large datasets.
-        
-        Returns:
-            Dict[str, int]: Dictionary mapping component names to memory usage in bytes
-        """
         def sizeof_iterative(obj):
             """Calculate size of complex objects iteratively to avoid recursion limits."""
             seen = set()
@@ -401,16 +261,6 @@ class StandardIndex(BaseIndex):
         }
     
     def export_json(self, filepath: str = None) -> Optional[str]:
-        """
-        Export the index to a JSON format for inspection or debugging.
-        
-        Args:
-            filepath (str, optional): Path where the JSON should be saved
-                                     If None, the JSON is returned as a string
-            
-        Returns:
-            Optional[str]: JSON string representation if no filepath is provided
-        """
         # Prepare export data - convert defaultdicts to regular dicts for serialization
         export_data = {
             "term_doc_freqs": {term: dict(docs) for term, docs in self.term_doc_freqs.items()},
