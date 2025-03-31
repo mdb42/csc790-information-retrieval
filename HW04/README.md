@@ -1,12 +1,12 @@
 # CSC 790 Information Retrieval
 
-Homework 4: To Be Determined
+Homework 4: Binary Independence Model (BIM)
 
 Author: Matthew Branson
 
 ## Overview
 
-This is just preparation for the next homework assignment, expecting it will be similar to Homework 2 except using BM25 ranking.
+This implementation applies the Binary Independence Model for probabilistic information retrieval. It ranks documents based on their probability of relevance to a given query using the principles described in the course material.
 
 ## Installation
 
@@ -48,7 +48,7 @@ python -c "import nltk; nltk.download('punkt')"
 
 ### Basic Usage
 
-Assuming your query file, documents directory, stopwords file, and special characters file are all in the project directory, you can navigate to the project directory and run the system with:
+Assuming your query files, relevance label files, documents directory, stopwords file, and special characters file are all in the project directory, you can navigate to the project directory and run the system with:
 
 ```bash
 python main.py
@@ -57,7 +57,8 @@ python main.py
 ### Command Line Options
 
 - `--config PATH`: Path to configuration file (default: "config.json")
-- `--queries_file PATH`: File containing queries to search (default: "queries.txt")
+- `--query_files PATHS`: List of files containing queries to search
+- `--labels_files PATHS`: List of files containing relevance labels for documents
 - `--documents_dir PATH`: Directory containing documents to index (default: "documents")
 - `--stopwords_file PATH`: File containing stopwords to remove (default: "stopwords.txt")
 - `--special_chars_file PATH`: File containing special characters to remove (default: "special_chars.txt")
@@ -70,18 +71,17 @@ python main.py
 
 ### Examples
 
-Provide custom query file, documents directory, stopwords file, and special characters file:
+Provide custom query files, labels files, and documents directory:
 ```bash
-python main.py --queries_file "path/to/queries.txt" --documents_dir "path/to/documents" --stopwords_file "path/to/stopwords.txt" --special_chars_file "path/to/special_chars.txt"
+python main.py --query_files "query1.txt" "query2.txt" --labels_files "file_label_query1.txt" "file_label_query2.txt" --documents_dir "path/to/documents"
 ```
 
-Force a index parallel implementation:
+Force a parallel index implementation:
 ```bash
 python main.py --index_mode parallel
 ```
 
-Export index to JSON for inspection:
+Use an existing index and display detailed statistics:
 ```bash
-python main.py --use_existing --export_json index_data.json
+python main.py --use_existing --stats
 ```
-

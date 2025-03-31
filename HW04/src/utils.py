@@ -2,7 +2,7 @@
 """
 Utility Functions
 Author: Matthew Branson
-Date: March 14, 2025
+Date: March 31, 2025
 
 This module provides utility functions for loading and saving configuration,
 formatting memory sizes, displaying detailed index statistics, and checking dependencies.
@@ -11,111 +11,88 @@ import json
 import os
 from typing import Dict
 
-def load_config(config_file='config.json'):
-    """Load configuration from JSON file, falling back to defaults if not found.
+# Define a single default configuration dictionary
+DEFAULT_CONFIG = {
+    "query_files": ["query1.txt", "query2.txt"],
+    "labels_files": ["file_label_query1.txt", "file_label_query2.txt"],
+    "documents_dir": "documents",
+    "stopwords_file": "stopwords.txt",
+    "special_chars_file": "special_chars.txt",
+    "index_file": "index.pkl",
+    "index_mode": "auto",
+    "parallel_index_threshold": 5000
+}
+
+def load_config(config_file='config.json') -> Dict:
+    """
+    Load configuration from a JSON file, falling back to defaults if not found or invalid.
     
     Args:
         config_file (str): Path to the configuration file
     
     Returns:
-        dict: The loaded configuration
+        dict: The loaded or default configuration
     """
     if not os.path.exists(config_file):
-        return ensure_config_exists(config_file)
-        
+        return _create_default_config(config_file)
+    
     try:
         with open(config_file, 'r') as f:
             config = json.load(f)
         
-        # Fill in any missing keys with defaults
-        default_config = {
-            'queries_file': 'queries.txt',
-            'documents_dir': 'documents',
-            'stopwords_file': 'stopwords.txt',
-            'special_chars_file': 'special_chars.txt',
-            'index_file': 'index.pkl',
-            'bm25_k1': 1.2,
-            'bm25_b': 0.75,
-            'index_mode': 'auto',
-            "parallel_index_threshold": 5000
-        }
-        
-        # Ensure all needed keys exist by combining with defaults
-        merged_config = {**default_config, **config}
-        return merged_config
+        # Merge with defaults to ensure all keys exist
+        return {**DEFAULT_CONFIG, **config}
     except Exception as e:
         print(f"Warning: Error loading config file {config_file}: {e}")
         print("Using default configuration.")
-        return ensure_config_exists(config_file)
+        return _create_default_config(config_file)
 
-def save_config(config, config_file='config.json'):
-    """Save current configuration to JSON file.
+def save_config(config: Dict, config_file='config.json'):
+    """
+    Save the current configuration to a JSON file.
     
     Args:
         config (dict): The configuration to save
         config_file (str): Path to the configuration file
     """
-    with open(config_file, 'w') as f:
-        json.dump(config, f, indent=2)
+    try:
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+    except Exception as e:
+        print(f"Error saving configuration to {config_file}: {e}")
 
-def ensure_config_exists(config_file='config.json'):
+def _create_default_config(config_file='config.json') -> Dict:
     """
-    Check if a configuration file exists, and create a default one if it doesn't.
+    Create a default configuration file if it doesn't exist.
     
     Args:
         config_file (str): Path to the configuration file
         
     Returns:
-        dict: The configuration (either loaded or newly created)
+        dict: The default configuration
     """
-    if os.path.exists(config_file):
-        return load_config(config_file)
-    
-    # Default configuration
-    default_config = {
-        'queries_file': 'queries.txt',
-        'documents_dir': 'documents',
-        'stopwords_file': 'stopwords.txt',
-        'special_chars_file': 'special_chars.txt',
-        'index_file': 'index.pkl',
-        'bm25_k1': 1.2,
-        'bm25_b': 0.75,
-        'index_mode': 'auto',
-        "parallel_index_threshold": 5000
-    }
-    
-    # Save the default configuration
     try:
-        save_config(default_config, config_file)
+        save_config(DEFAULT_CONFIG, config_file)
         print(f"Created default configuration file: {config_file}")
     except Exception as e:
         print(f"Warning: Could not create default configuration file: {e}")
     
-    return default_config
+    return DEFAULT_CONFIG
 
-def check_multiprocessing():
-        """
-        Check if multiprocessing is available and functional on the system.
-        
-        This method attempts to create a multiprocessing pool to verify
-        that parallel processing is actually available.
-        
-        Returns:
-            bool: True if multiprocessing is available and functional, False otherwise
-        """
-        try:
-            import multiprocessing
-            try:
-                # Try to create a process pool to verify multiprocessing works
-                with multiprocessing.Pool(1) as p:
-                    pass
-                return True
-            except (ImportError, OSError, ValueError):
-                # Various errors that can occur if multiprocessing is unavailable
-                return False
-        except ImportError:
-            # Multiprocessing module not available
-            return False
+def check_multiprocessing() -> bool:
+    """
+    Check if multiprocessing is available and functional on the system.
+    
+    Returns:
+        bool: True if multiprocessing is available and functional, False otherwise
+    """
+    try:
+        import multiprocessing
+        with multiprocessing.Pool(1) as _:
+            pass
+        return True
+    except (ImportError, OSError, ValueError):
+        return False
 
 def display_vocabulary_statistics(index):
     """
@@ -131,7 +108,8 @@ def display_vocabulary_statistics(index):
     print("=" * 55)
 
 def display_detailed_statistics(index):
-    """Display detailed statistics about the index.
+    """
+    Display detailed statistics about the index.
     
     Args:
         index (BaseIndex): The index instance to analyze
@@ -151,10 +129,11 @@ def display_detailed_statistics(index):
     for key, value in stats['memory_usage'].items():
         print(f"{key}: {format_memory_size(value)}")
     
-    print("\n"+"=" * 56)
+    print("\n" + "=" * 56)
 
-def format_memory_size(value):
-    """Format memory size to human-readable format.
+def format_memory_size(value: int) -> str:
+    """
+    Format memory size to a human-readable format.
     
     Args:
         value (int): Memory size in bytes
@@ -162,11 +141,11 @@ def format_memory_size(value):
     Returns:
         str: Formatted memory size with units
     """
-    if value > 1024 * 1024 * 1024:
-        return f"{value / (1024 * 1024 * 1024):.2f} GB"
-    elif value > 1024 * 1024:
-        return f"{value / (1024 * 1024):.2f} MB"
+    if value > 1024 ** 3:
+        return f"{value / (1024 ** 3):.2f} GB"
+    elif value > 1024 ** 2:
+        return f"{value / (1024 ** 2):.2f} MB"
     elif value > 1024:
         return f"{value / 1024:.2f} KB"
     else:
-        return f"{value:,} bytes"    
+        return f"{value:,} bytes"

@@ -1,7 +1,7 @@
 """
 CSC 790 Information Retrieval
 
-Homework 4: TBD (Probably Probabilistic Retrieval)
+Homework 4: Binary Independence Model (BIM)
 Author: Matthew Branson
 
 Precisely powerful probabilistic paradigms: providing proficient, performant
@@ -17,11 +17,11 @@ import argparse
 import sys
 from src.profiler import Profiler
 from src.index import IndexFactory
-from src.retrieval_bm25 import RetrievalBM25
+from src.bim import RetrievalBIM
 
-from src.utils import ( display_vocabulary_statistics, # Feature since HW01 (inverted index)
-                        display_detailed_statistics, # Initially as memory report since HW01 (inverted index)
-                        load_config) # When defaults and CLI args just aren't enough
+from src.utils import ( display_vocabulary_statistics,
+                        display_detailed_statistics,
+                        load_config)
 
 def parse_arguments():
     """
@@ -36,8 +36,10 @@ def parse_arguments():
     # General Options
     parser.add_argument('--config', default='config.json', 
                         help='Path to configuration file')
-    parser.add_argument('--queries_file', default=config['queries_file'],
-                        help=f"File containing queries to evaluate (default: {config['queries_file']})")
+    parser.add_argument('--query_files', nargs='+', default=config['query_files'],
+                    help=f"Files containing queries to evaluate (default: {config['query_files']})")
+    parser.add_argument('--labels_files', nargs='+', default=config['labels_files'],
+                        help=f"Files containing relevance labels (default: {config['labels_files']})")
     parser.add_argument('--documents_dir', default=config['documents_dir'], 
                         help=f"Directory containing documents to index (default: {config['documents_dir']})")
     parser.add_argument('--stopwords_file', default=config['stopwords_file'], 
@@ -59,12 +61,6 @@ def parse_arguments():
     parser.add_argument('--parallel_index_threshold', type=int, default=config['parallel_index_threshold'],
                        help=f"Document threshold for parallel index (default: {config['parallel_index_threshold']})")
     
-    # BM25 Options
-    parser.add_argument('--bm25_k1', type=float, default=config['bm25_k1'],
-                        help=f"BM25 k1 parameter (default: {config['bm25_k1']})")
-    parser.add_argument('--bm25_b', type=float, default=config['bm25_b'],
-                        help=f"BM25 b parameter (default: {config['bm25_b']})")
-
     args = parser.parse_args()
     
     # If a non-default config file is specified and exists, load it and apply values
@@ -98,32 +94,53 @@ def display_banner():
     print("Last Name : Branson")
     print("=" * 55)
 
-def process_queries(model, queries_file, profiler):
+def process_queries(model, query_files, label_files, profiler):
     """
-    Process queries from a file and display results.
+    Process queries from files and display results.
     
     Args:
-        model (BaseBM25): BM25 model to use for scoring
-        queries_file (str): Path to file containing queries
-        profiler (Profiler): Performance profiler for timing operations
+        model: Binary Independence Model to use for scoring
+        query_files (list): List of paths to query files
+        label_files (list): List of paths to relevance label files
+        profiler (Profiler): Performance profiler
     """
-    with open(queries_file, 'r') as f:
-        queries = f.readlines()
+    if isinstance(query_files, str):
+        query_files = [query_files]
+    if isinstance(label_files, str):
+        label_files = [label_files]
     
-    for query in queries:
-        query = query.strip()
-        if not query:
-            continue
-        
-        with profiler.timer(f"Query Processing: {query}"):
-            results = model.search(query)
-        
-        print(f"\nQuery: {query}")
-        if results:
-            for i, (doc_id, score) in enumerate(results, 1):
-                print(f"{i}. Document ID: {doc_id}, Score: {score:.4f}")
-        else:
-            print("No results found")
+    with profiler.timer("Total Query Processing"):
+        for i, (query_file, label_file) in enumerate(zip(query_files, label_files), 1):
+            # Load relevance labels for this query
+            model.load_relevance_labels(label_file)
+            
+            try:
+                # Read query from file
+                with open(query_file, 'r') as f:
+                    query = f.read().strip()
+                
+                if not query:
+                    profiler.log_message(f"Warning: Empty query in file {query_file}")
+                    continue
+                
+                # Process query and get results
+                with profiler.timer(f"Query {i} Total"):
+                    results = model.search(query)
+                
+                # Display results
+                print("\n"+"="*19+f" Query {i} " +"="*24)
+                if results:
+                    for doc_id, score in results:
+                        # Get relevance label
+                        label = model.get_relevance_label(doc_id)
+                        print(f"RSV{{ {doc_id} }} = {score:.2f}\t{label}")
+                else:
+                    print("No results found")
+                    
+            except FileNotFoundError:
+                profiler.log_message(f"Error: Could not find file {query_file}")
+            except Exception as e:
+                profiler.log_message(f"Error processing query {i}: {e}")
 
 def main():
     """
@@ -170,16 +187,16 @@ def main():
             index.export_json(args.export_json)
             print(f"Index exported to {args.export_json}")
 
-    # Create BM25 model
-    model = RetrievalBM25(index, profiler)
+    # Create BIM retrieval model
+    model = RetrievalBIM(index, profiler=profiler)    
+
+    # Process queries and display results
+    process_queries(model, args.query_files, args.labels_files, profiler)
 
     # Display detailed index statistics if requested
     if args.stats:
         display_vocabulary_statistics(index)
         display_detailed_statistics(index)
-
-    # Process queries and display results
-    process_queries(model, args.queries_file, profiler)
 
     # Generate and display performance report
     print("\n" + profiler.generate_report(
